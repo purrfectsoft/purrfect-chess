@@ -125,7 +125,9 @@ To manually verify the implementation:
 
 ## Legacy Comparison
 
-### Differences from Legacy: NONE
+### Differences from Legacy
+
+None identified.
 
 The Next.js implementation matches the legacy vanilla JS version exactly:
 

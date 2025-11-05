@@ -10,8 +10,7 @@
  * Note: These are visual regression tests using Playwright
  */
 
-import { test, expect } from 'vitest';
-import { describe, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('Engine Move Suggestion Overlay Documentation', () => {
   it('should document engine overlay color scheme', () => {
