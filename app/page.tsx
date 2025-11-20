@@ -4,6 +4,7 @@ import { observer } from 'mobx-react-lite';
 import NotificationContainer from '@/components/NotificationContainer';
 import { MainLayout, GameLayout, ControlPanel } from '@/components/layout';
 import { PlayerControls, BoardSection } from '@/components/features';
+import RoomManager from '@/components/RoomManager';
 import { useRootStore } from '@/stores/store-setup';
 import { useEngine } from '@/hooks/useEngine';
 import { useAutoEvaluation } from '@/hooks/useAutoEvaluation';
@@ -60,6 +61,19 @@ const Home = observer(() => {
   const { setTargetElement } = useEasterEgg({
     onReveal: () => store.ui.showEnginePanel(),
   });
+
+  // Handle room query parameter for shareable URLs
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room');
+    
+    if (roomParam && !store.multiplayer.isInSession) {
+      // Auto-join room from URL parameter
+      showMessage('info', `Joining room ${roomParam}...`);
+    }
+  }, [store.multiplayer.isInSession, showMessage]);
 
   // Get engine highlights and best eval from store (shared global state)
   const engineHighlights = engine.engineHighlights;
@@ -169,17 +183,29 @@ const Home = observer(() => {
           />
         }
         rightPanel={
-          <ControlPanel title="Black Controls">
-            <PlayerControls
-              player="b"
-              showMoveHistory={true}
-              onShowMessage={showMessage}
-              pgnInput={pgnInput}
-              setPgnInput={setPgnInput}
-              fenInput={fenInput}
-              setFenInput={setFenInput}
-            />
-          </ControlPanel>
+          <>
+            <ControlPanel title="Black Controls">
+              <PlayerControls
+                player="b"
+                showMoveHistory={true}
+                onShowMessage={showMessage}
+                pgnInput={pgnInput}
+                setPgnInput={setPgnInput}
+                fenInput={fenInput}
+                setFenInput={setFenInput}
+              />
+            </ControlPanel>
+            
+            {/* Multiplayer Room Manager */}
+            <div className="mt-4">
+              <RoomManager
+                onRoomJoined={(roomId, sessionId) => {
+                  showMessage('success', `Joined room: ${roomId}`);
+                }}
+                onShowMessage={showMessage}
+              />
+            </div>
+          </>
         }
       />
 
