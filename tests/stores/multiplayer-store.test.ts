@@ -453,4 +453,83 @@ describe('Multiplayer Store', () => {
       expect(store.multiplayer.moves.length).toBe(1);
     });
   });
+
+  describe('Move Queue Integration', () => {
+    beforeEach(() => {
+      store.multiplayer.joinRoom('room', 'session', 'player-1', 'Alice');
+    });
+
+    it('should enqueue remote moves', () => {
+      store.multiplayer.enqueueRemoteMove(
+        'e2',
+        'e4',
+        'e4',
+        'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
+        'player-2',
+        new Date().toISOString()
+      );
+
+      const queue = store.multiplayer.getMoveQueue();
+      expect(queue.isEmpty()).toBe(false);
+      expect(queue.length()).toBe(1);
+    });
+
+    it('should get move queue for processing', () => {
+      const queue = store.multiplayer.getMoveQueue();
+      expect(queue).toBeDefined();
+      expect(queue.isEmpty()).toBe(true);
+    });
+
+    it('should clear move queue', () => {
+      store.multiplayer.enqueueRemoteMove(
+        'e2',
+        'e4',
+        'e4',
+        'fen',
+        'player-2',
+        new Date().toISOString()
+      );
+
+      const queue = store.multiplayer.getMoveQueue();
+      expect(queue.length()).toBe(1);
+
+      store.multiplayer.clearMoveQueue();
+      expect(queue.length()).toBe(0);
+    });
+
+    it('should clear queue on reset', () => {
+      store.multiplayer.enqueueRemoteMove(
+        'e2',
+        'e4',
+        'e4',
+        'fen',
+        'player-2',
+        new Date().toISOString()
+      );
+
+      store.multiplayer.reset();
+
+      const queue = store.multiplayer.getMoveQueue();
+      expect(queue.isEmpty()).toBe(true);
+    });
+
+    it('should enqueue move with promotion', () => {
+      store.multiplayer.enqueueRemoteMove(
+        'e7',
+        'e8',
+        'e8=Q',
+        'fen-after-promotion',
+        'player-2',
+        new Date().toISOString(),
+        'q',
+        120000
+      );
+
+      const queue = store.multiplayer.getMoveQueue();
+      const move = queue.dequeue();
+      expect(move).toBeDefined();
+      expect(move?.payload.promotion).toBe('q');
+      expect(move?.payload.timeRemainingMs).toBe(120000);
+    });
+  });
 });
