@@ -88,6 +88,34 @@ The app uses Next.js, React, TypeScript, Tailwind CSS, MobX, and chess.js. Stock
 
 All piece and square PNGs live under `/public/assets/` and are licensed under CC BY 4.0 (see `LICENSE.md`).
 
+### Supabase Configuration (Optional)
+
+This project includes Supabase integration for future features like game storage and multiplayer support.
+
+To configure Supabase:
+
+1. **Create a Supabase project** at [supabase.com](https://supabase.com)
+
+2. **Copy the environment template**:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+3. **Add your Supabase credentials** to `.env.local`:
+   - Get your project URL and anon key from [Supabase Dashboard → Settings → API](https://supabase.com/dashboard/project/_/settings/api)
+   - Update `NEXT_PUBLIC_SUPABASE_URL` with your project URL
+   - Update `NEXT_PUBLIC_SUPABASE_ANON_KEY` with your anon/public key
+   - Optionally add `SUPABASE_SERVICE_ROLE_KEY` for server-side admin operations
+
+4. **Restart the dev server** to load the new environment variables:
+   ```bash
+   yarn dev
+   ```
+
+The Supabase client is available at `@/lib/supabase` for use in components and API routes. See [`lib/supabase.ts`](./lib/supabase.ts) for usage examples.
+
+**Note**: The app works without Supabase configuration. Environment variables are only required if you're using Supabase features.
+
 ### Hidden engine panel
 
 Select the grey text inside the board column that reads `(Reserved for future use)` and, while it is highlighted, type `gmmamun`. The Stockfish controls will appear, letting you choose the search depth and view the top three moves.
