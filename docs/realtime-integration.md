@@ -277,6 +277,182 @@ yarn test tests/lib/supabase/realtime.test.ts
 yarn test tests/hooks/useMultiplayer.test.tsx
 ```
 
+## Integration with Multiplayer Store
+
+The `useMultiplayer` hook integrates seamlessly with the MobX multiplayer store to persist game state:
+
+```tsx
+import { useEffect } from 'react';
+import { observer } from 'mobx-react-lite';
+import { useRootStore } from '@/stores/store-setup';
+import { useMultiplayer, ConnectionStatus } from '@/hooks/useMultiplayer';
+
+const MultiplayerGame = observer(({ roomId, playerId, displayName }: {
+  roomId: string;
+  playerId: string;
+  displayName: string;
+}) => {
+  const store = useRootStore();
+  const multiplayer = store.multiplayer;
+  
+  const {
+    connectionStatus,
+    isConnected,
+    connect,
+    disconnect,
+    broadcastMove,
+    broadcastPlayerJoin,
+  } = useMultiplayer({
+    roomId,
+    playerId,
+    onMove: (payload, message) => {
+      // Don't process our own moves
+      if (message.senderId === playerId) return;
+      
+      // Add move to store history
+      multiplayer.addMove(
+        `${Date.now()}-${message.senderId}`,
+        payload.from,
+        payload.to,
+        payload.san,
+        payload.fen,
+        message.senderId,
+        payload.promotion,
+        payload.timeRemainingMs
+      );
+      
+      // Apply move to game state
+      store.game.movePiece(payload.from, payload.to, payload.promotion);
+    },
+    onPlayerJoin: (payload, message) => {
+      // Add player to store
+      multiplayer.addOrUpdatePlayer(
+        payload.playerId,
+        payload.displayName,
+        payload.color
+      );
+    },
+    onPlayerLeave: (payload) => {
+      // Remove player from store
+      multiplayer.removePlayer(payload.playerId);
+    },
+    onConnectionChange: (status) => {
+      // Sync connection status to store
+      multiplayer.setConnectionStatus(status);
+    },
+    autoConnect: false,
+  });
+  
+  // Join room when component mounts
+  useEffect(() => {
+    const joinSession = async () => {
+      // Update store with session info
+      multiplayer.joinRoom(roomId, roomId, playerId, displayName);
+      
+      // Connect to realtime channel
+      await connect();
+      
+      // Broadcast join event
+      await broadcastPlayerJoin({
+        playerId,
+        displayName,
+      });
+    };
+    
+    joinSession();
+    
+    return () => {
+      disconnect();
+      multiplayer.leaveRoom();
+    };
+  }, []);
+  
+  // Handle local moves
+  const handleLocalMove = async (from: string, to: string, promotion?: string) => {
+    const success = store.game.movePiece(from, to, promotion);
+    
+    if (success) {
+      const moveId = `${Date.now()}-${playerId}`;
+      const san = store.game.history[store.game.history.length - 1].san;
+      const fen = store.game.fen;
+      
+      // Add to multiplayer history
+      multiplayer.addMove(
+        moveId,
+        from,
+        to,
+        san,
+        fen,
+        playerId,
+        promotion
+      );
+      
+      // Broadcast to other players
+      await broadcastMove({
+        from,
+        to,
+        promotion,
+        san,
+        fen,
+      });
+    }
+  };
+  
+  return (
+    <div>
+      <div>Connection: {multiplayer.connectionStatus}</div>
+      <div>Session: {multiplayer.sessionId || 'None'}</div>
+      <div>Players: {multiplayer.players.size}</div>
+      <div>Moves: {multiplayer.moveCount}</div>
+      
+      {/* Game board and controls */}
+    </div>
+  );
+});
+```
+
+### Store Benefits
+
+The multiplayer store provides:
+
+1. **Persistent State** - Session and player data survive page refreshes
+2. **Reactive Updates** - MobX observers automatically re-render on changes
+3. **Centralized State** - All multiplayer state in one place
+4. **Type Safety** - Full TypeScript support with MST models
+
+### Store Actions
+
+Access multiplayer state through the root store:
+
+```tsx
+const store = useRootStore();
+const mp = store.multiplayer;
+
+// Connection management
+mp.setConnectionStatus('connected');
+console.log(mp.isConnected); // true
+
+// Room/session management
+mp.joinRoom('room-123', 'session-456', 'player-1', 'Alice');
+mp.leaveRoom();
+mp.setSessionState('active');
+
+// Player management
+mp.addOrUpdatePlayer('player-2', 'Bob', 'black', true);
+mp.removePlayer('player-2');
+const whitePlayer = mp.getPlayerByColor('white');
+
+// Move tracking
+mp.addMove('move-1', 'e2', 'e4', 'e4', 'fen...', 'player-1');
+mp.clearMoves();
+
+// State queries
+console.log(mp.isInSession);     // true if in a room
+console.log(mp.localPlayer);      // Local player info
+console.log(mp.remotePlayers);    // Array of remote players
+console.log(mp.moveCount);        // Number of moves
+```
+
 ## Next Steps
 
 - Integrate with game UI components
