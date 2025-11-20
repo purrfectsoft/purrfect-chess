@@ -213,3 +213,62 @@ jobs:
           name: e2e-test-results
           path: test-results/
           retention-days: 30
+
+  e2e-multiplayer:
+    name: E2E Multiplayer Tests
+    runs-on: ubuntu-latest
+    # Only run if Supabase secrets are configured
+    if: ${{ vars.SUPABASE_TEST_URL != '' && secrets.SUPABASE_TEST_ANON_KEY != '' }}
+    
+    permissions:
+      contents: read
+      actions: write  # For uploading artifacts
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Ensure Yarn classic (v1)
+        run: |
+          if ! command -v yarn >/dev/null 2>&1; then
+            npm i -g yarn@1.22.22
+          else
+            if ! yarn --version | grep -Eq '^1\.'; then
+              npm i -g yarn@1.22.22
+            fi
+          fi
+          yarn --version
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Multiplayer E2E tests
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_TEST_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
+        run: yarn test:e2e e2e/multiplayer.spec.ts
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-multiplayer
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-multiplayer-test-results
+          path: test-results/
+          retention-days: 30

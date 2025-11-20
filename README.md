@@ -239,9 +239,18 @@ yarn test:coverage     # Generate coverage report
 yarn test:e2e          # Run E2E tests (headless)
 yarn test:e2e:ui       # Run E2E tests in UI mode (recommended for debugging)
 yarn test:e2e:headed   # Run E2E tests with visible browser
+
+# Run specific test file
+yarn test:e2e e2e/multiplayer.spec.ts
+
+# Run multiplayer tests (requires Supabase credentials)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co \
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-key \
+yarn test:e2e e2e/multiplayer.spec.ts
 ```
 
-See [TESTING.md](./TESTING.md) for comprehensive testing guidelines and [e2e/README.md](./e2e/README.md) for detailed E2E testing documentation.
+See [TESTING.md](./TESTING.md) for comprehensive testing guidelines and [e2e/README.md](./e2e/README.md) for detailed E2E testing documentation, including multiplayer test setup.
+
 
 ### Building
 
