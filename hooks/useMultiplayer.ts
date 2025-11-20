@@ -13,6 +13,9 @@ import {
   type DrawResponsePayload,
   type ResignPayload,
   type RealtimeMessage,
+  type PresenceState,
+  type PresenceJoinCallback,
+  type PresenceLeaveCallback,
 } from '@/lib/supabase/realtime';
 
 /**
@@ -57,6 +60,9 @@ export interface UseMultiplayerOptions {
     message: RealtimeMessage<ResignPayload>
   ) => void;
   onConnectionChange?: (status: ConnectionStatus) => void;
+  onPresenceJoin?: PresenceJoinCallback;
+  onPresenceLeave?: PresenceLeaveCallback;
+  presenceState?: PresenceState;
   autoConnect?: boolean;
 }
 
@@ -113,6 +119,9 @@ export function useMultiplayer(
     onDrawResponse,
     onResign,
     onConnectionChange,
+    onPresenceJoin,
+    onPresenceLeave,
+    presenceState,
     autoConnect = false,
   } = options;
 
@@ -131,6 +140,8 @@ export function useMultiplayer(
     onDrawResponse,
     onResign,
     onConnectionChange,
+    onPresenceJoin,
+    onPresenceLeave,
   });
 
   // Keep callbacks up to date
@@ -144,6 +155,8 @@ export function useMultiplayer(
       onDrawResponse,
       onResign,
       onConnectionChange,
+      onPresenceJoin,
+      onPresenceLeave,
     };
   }, [
     onMove,
@@ -154,6 +167,8 @@ export function useMultiplayer(
     onDrawResponse,
     onResign,
     onConnectionChange,
+    onPresenceJoin,
+    onPresenceLeave,
   ]);
 
   // Initialize channel manager once
@@ -210,7 +225,13 @@ export function useMultiplayer(
         onResign: (message) => {
           callbacksRef.current.onResign?.(message.payload, message);
         },
-      });
+        onPresenceJoin: (playerId, state) => {
+          callbacksRef.current.onPresenceJoin?.(playerId, state);
+        },
+        onPresenceLeave: (playerId) => {
+          callbacksRef.current.onPresenceLeave?.(playerId);
+        },
+      }, presenceState);
 
       updateConnectionStatus(ConnectionStatus.CONNECTED);
       console.log(`[useMultiplayer] Connected to room: ${roomId}`);

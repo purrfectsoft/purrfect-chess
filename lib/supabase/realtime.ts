@@ -16,6 +16,16 @@ export enum RealtimeEventType {
 }
 
 /**
+ * Presence state for a player
+ */
+export interface PresenceState {
+  playerId: string;
+  displayName: string;
+  online_at: string; // ISO 8601 timestamp
+  color?: 'white' | 'black';
+}
+
+/**
  * Base message format for all realtime events
  */
 export interface RealtimeMessage<T = unknown> {
@@ -76,6 +86,15 @@ export interface ResignPayload {
 export type MessageCallback<T = unknown> = (message: RealtimeMessage<T>) => void;
 
 /**
+ * Presence callback types
+ */
+export type PresenceJoinCallback = (
+  playerId: string,
+  state: PresenceState
+) => void;
+export type PresenceLeaveCallback = (playerId: string) => void;
+
+/**
  * Reconnection configuration
  */
 export interface ReconnectionConfig {
@@ -109,6 +128,7 @@ export class RealtimeChannelManager {
    * Join a room channel and subscribe to messages
    * @param roomId - The room identifier to join
    * @param callbacks - Message callbacks for different event types
+   * @param presenceState - Optional presence state to track
    * @returns The created channel
    */
   async joinRoom(
@@ -122,7 +142,10 @@ export class RealtimeChannelManager {
       onDrawResponse?: MessageCallback<DrawResponsePayload>;
       onResign?: MessageCallback<ResignPayload>;
       onAnyMessage?: MessageCallback;
-    }
+      onPresenceJoin?: PresenceJoinCallback;
+      onPresenceLeave?: PresenceLeaveCallback;
+    },
+    presenceState?: PresenceState
   ): Promise<RealtimeChannel> {
     const channelName = `room:${roomId}`;
 
@@ -136,6 +159,25 @@ export class RealtimeChannelManager {
 
     // Create channel
     const channel = this.supabase.channel(channelName);
+
+    // Subscribe to presence if callbacks provided
+    if (callbacks.onPresenceJoin || callbacks.onPresenceLeave) {
+      channel
+        .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+          console.log(`[Realtime] Presence join: ${key}`, newPresences);
+          newPresences.forEach((presence) => {
+            const state = presence as unknown as PresenceState;
+            callbacks.onPresenceJoin?.(state.playerId, state);
+          });
+        })
+        .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+          console.log(`[Realtime] Presence leave: ${key}`, leftPresences);
+          leftPresences.forEach((presence) => {
+            const state = presence as unknown as PresenceState;
+            callbacks.onPresenceLeave?.(state.playerId);
+          });
+        });
+    }
 
     // Subscribe to broadcast messages
     channel.on('broadcast', { event: '*' }, (payload) => {
@@ -184,11 +226,18 @@ export class RealtimeChannelManager {
 
     // Subscribe and handle the result
     const subscribeResult = await new Promise<'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED'>((resolve) => {
-      channel.subscribe((status) => {
+      channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           console.log(`[Realtime] Successfully subscribed to ${channelName}`);
           this.channels.set(channelName, channel);
           this.reconnectionAttempts.set(channelName, 0);
+          
+          // Track presence if state provided
+          if (presenceState) {
+            console.log(`[Realtime] Tracking presence:`, presenceState);
+            await channel.track(presenceState);
+          }
+          
           resolve('SUBSCRIBED');
         } else if (status === 'TIMED_OUT') {
           console.error(`[Realtime] Subscription timed out for ${channelName}`);
@@ -202,10 +251,49 @@ export class RealtimeChannelManager {
 
     // Handle reconnection if subscription failed
     if (subscribeResult !== 'SUBSCRIBED') {
-      this.handleReconnection(roomId, callbacks);
+      this.handleReconnection(roomId, callbacks, presenceState);
     }
 
     return channel;
+  }
+
+  /**
+   * Update presence state for the current client
+   * @param roomId - The room identifier
+   * @param presenceState - The updated presence state
+   */
+  async updatePresence(roomId: string, presenceState: PresenceState): Promise<void> {
+    const channelName = `room:${roomId}`;
+    const channel = this.channels.get(channelName);
+
+    if (!channel) {
+      console.error(
+        `[Realtime] Cannot update presence - not subscribed to channel: ${channelName}`
+      );
+      return;
+    }
+
+    await channel.track(presenceState);
+    console.log(`[Realtime] Updated presence in ${channelName}`, presenceState);
+  }
+
+  /**
+   * Untrack presence for the current client
+   * @param roomId - The room identifier
+   */
+  async untrackPresence(roomId: string): Promise<void> {
+    const channelName = `room:${roomId}`;
+    const channel = this.channels.get(channelName);
+
+    if (!channel) {
+      console.warn(
+        `[Realtime] Cannot untrack presence - not subscribed to channel: ${channelName}`
+      );
+      return;
+    }
+
+    await channel.untrack();
+    console.log(`[Realtime] Untracked presence in ${channelName}`);
   }
 
   /**
@@ -263,6 +351,13 @@ export class RealtimeChannelManager {
       return;
     }
 
+    // Untrack presence before leaving
+    try {
+      await channel.untrack();
+    } catch (error) {
+      console.warn(`[Realtime] Error untracking presence:`, error);
+    }
+
     // Clear any pending reconnection timers
     const timer = this.reconnectionTimers.get(channelName);
     if (timer) {
@@ -305,10 +400,12 @@ export class RealtimeChannelManager {
    * Handle reconnection with exponential backoff
    * @param roomId - The room identifier
    * @param callbacks - The callbacks to resubscribe with
+   * @param presenceState - Optional presence state to restore
    */
   private handleReconnection(
     roomId: string,
-    callbacks: Parameters<typeof this.joinRoom>[1]
+    callbacks: Parameters<typeof this.joinRoom>[1],
+    presenceState?: PresenceState
   ): void {
     const channelName = `room:${roomId}`;
     const attempts = this.reconnectionAttempts.get(channelName) || 0;
@@ -334,7 +431,7 @@ export class RealtimeChannelManager {
 
     const timer = setTimeout(() => {
       this.reconnectionAttempts.set(channelName, attempts + 1);
-      this.joinRoom(roomId, callbacks);
+      this.joinRoom(roomId, callbacks, presenceState);
     }, delay);
 
     this.reconnectionTimers.set(channelName, timer);
