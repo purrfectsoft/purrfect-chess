@@ -1,5 +1,6 @@
 import { types, Instance, SnapshotIn, flow } from 'mobx-state-tree';
 import { Chess } from 'chess.js';
+import type { SessionState } from '@/lib/supabase/types';
 
 /**
  * Promisified delay function for use in MST flows
@@ -482,6 +483,273 @@ const EngineStateModel = types
   }));
 
 /**
+ * Multiplayer Player Model
+ * Represents a player in a multiplayer session
+ */
+const MultiplayerPlayerModel = types.model('MultiplayerPlayer', {
+  id: types.identifier,
+  displayName: types.string,
+  color: types.maybeNull(types.enumeration('PlayerColor', ['white', 'black'])),
+  isOnline: types.optional(types.boolean, true),
+  lastSeenAt: types.optional(types.string, () => new Date().toISOString()),
+});
+
+/**
+ * Multiplayer Move Model
+ * Represents a move in multiplayer history
+ */
+const MultiplayerMoveModel = types.model('MultiplayerMove', {
+  id: types.identifier,
+  from: types.string,
+  to: types.string,
+  promotion: types.maybeNull(types.string),
+  san: types.string,
+  fen: types.string,
+  playerId: types.string,
+  timestamp: types.string,
+  timeRemainingMs: types.maybeNull(types.number),
+});
+
+/**
+ * Multiplayer State Model
+ * Manages multiplayer session state, players, moves, and connection status
+ *
+ * This store tracks:
+ * - Current session/room information
+ * - Players in the session
+ * - Move history specific to multiplayer
+ * - Connection status (transient, not persisted)
+ * - Last activity timestamp
+ */
+const MultiplayerStateModel = types
+  .model('MultiplayerState', {
+    // Session identifiers
+    sessionId: types.maybeNull(types.string),
+    roomId: types.maybeNull(types.string),
+
+    // Session state
+    sessionState: types.optional(
+      types.enumeration('SessionState', [
+        'waiting',
+        'active',
+        'completed',
+        'abandoned',
+        'expired',
+      ]),
+      'waiting'
+    ),
+
+    // Player tracking
+    localPlayerId: types.maybeNull(types.string),
+    players: types.map(MultiplayerPlayerModel),
+
+    // Move history (separate from local game moves)
+    moves: types.array(MultiplayerMoveModel),
+
+    // Connection status (transient)
+    connectionStatus: types.optional(
+      types.enumeration('ConnectionStatus', [
+        'disconnected',
+        'connecting',
+        'connected',
+        'error',
+      ]),
+      'disconnected'
+    ),
+
+    // Activity tracking
+    lastActivityAt: types.optional(types.string, () => new Date().toISOString()),
+  })
+  .views((self) => ({
+    get isConnected() {
+      return self.connectionStatus === 'connected';
+    },
+    get isInSession() {
+      return self.sessionId !== null && self.roomId !== null;
+    },
+    get localPlayer() {
+      return self.localPlayerId ? self.players.get(self.localPlayerId) : null;
+    },
+    get remotePlayers() {
+      const players: typeof self.players extends types.IMapType<infer T>
+        ? Instance<T>[]
+        : never[] = [];
+      self.players.forEach((player) => {
+        if (player.id !== self.localPlayerId) {
+          players.push(player);
+        }
+      });
+      return players;
+    },
+    get moveCount() {
+      return self.moves.length;
+    },
+    /**
+     * Get player by color
+     */
+    getPlayerByColor(color: 'white' | 'black') {
+      let foundPlayer: Instance<typeof MultiplayerPlayerModel> | null = null;
+      self.players.forEach((player) => {
+        if (player.color === color) {
+          foundPlayer = player;
+        }
+      });
+      return foundPlayer;
+    },
+  }))
+  .actions((self) => ({
+    /**
+     * Set connection status
+     */
+    setConnectionStatus(
+      status: 'disconnected' | 'connecting' | 'connected' | 'error'
+    ) {
+      self.connectionStatus = status;
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Join a room/session
+     */
+    joinRoom(
+      roomId: string,
+      sessionId: string,
+      localPlayerId: string,
+      displayName: string
+    ) {
+      self.roomId = roomId;
+      self.sessionId = sessionId;
+      self.localPlayerId = localPlayerId;
+      self.sessionState = 'waiting';
+      self.lastActivityAt = new Date().toISOString();
+
+      // Add local player if not already present
+      if (!self.players.has(localPlayerId)) {
+        self.players.put({
+          id: localPlayerId,
+          displayName,
+          color: null,
+          isOnline: true,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+
+      console.log(`[MultiplayerStore] Joined room: ${roomId}, session: ${sessionId}`);
+    },
+
+    /**
+     * Leave the current room/session
+     */
+    leaveRoom() {
+      console.log(
+        `[MultiplayerStore] Leaving room: ${self.roomId}, session: ${self.sessionId}`
+      );
+      self.roomId = null;
+      self.sessionId = null;
+      self.sessionState = 'abandoned';
+      self.connectionStatus = 'disconnected';
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Update session state
+     */
+    setSessionState(state: SessionState) {
+      self.sessionState = state;
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Add or update a player
+     */
+    addOrUpdatePlayer(
+      playerId: string,
+      displayName: string,
+      color?: 'white' | 'black' | null,
+      isOnline?: boolean
+    ) {
+      const existingPlayer = self.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.displayName = displayName;
+        if (color !== undefined) {
+          existingPlayer.color = color;
+        }
+        if (isOnline !== undefined) {
+          existingPlayer.isOnline = isOnline;
+        }
+        existingPlayer.lastSeenAt = new Date().toISOString();
+      } else {
+        self.players.put({
+          id: playerId,
+          displayName,
+          color: color || null,
+          isOnline: isOnline ?? true,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Remove a player
+     */
+    removePlayer(playerId: string) {
+      self.players.delete(playerId);
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Add a move to the history
+     */
+    addMove(
+      moveId: string,
+      from: string,
+      to: string,
+      san: string,
+      fen: string,
+      playerId: string,
+      promotion?: string,
+      timeRemainingMs?: number
+    ) {
+      self.moves.push({
+        id: moveId,
+        from,
+        to,
+        promotion: promotion || null,
+        san,
+        fen,
+        playerId,
+        timestamp: new Date().toISOString(),
+        timeRemainingMs: timeRemainingMs ?? null,
+      });
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Clear all moves
+     */
+    clearMoves() {
+      self.moves.clear();
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Reset the multiplayer state to initial values
+     */
+    reset() {
+      self.sessionId = null;
+      self.roomId = null;
+      self.sessionState = 'waiting';
+      self.localPlayerId = null;
+      self.players.clear();
+      self.moves.clear();
+      self.connectionStatus = 'disconnected';
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] State reset');
+    },
+  }));
+
+/**
  * Root Store Model
  * Combines all store slices
  */
@@ -491,6 +759,7 @@ const RootStoreModel = types
     ui: UIStateModel,
     settings: SettingsModel,
     engine: EngineStateModel,
+    multiplayer: MultiplayerStateModel,
   })
   .actions((self) => ({
     hydrateStore() {
@@ -531,10 +800,22 @@ export const createDefaultSnapshot = () => ({
     currentDepth: 0,
     currentFen: '',
   },
+  multiplayer: {
+    sessionId: null,
+    roomId: null,
+    sessionState: 'waiting' as const,
+    localPlayerId: null,
+    players: {},
+    moves: [],
+    connectionStatus: 'disconnected' as const,
+    lastActivityAt: new Date().toISOString(),
+  },
 });
 
 export type RootStore = Instance<typeof RootStoreModel>;
 export type RootStoreSnapshot = SnapshotIn<typeof RootStoreModel>;
 export type EngineAnalysis = Instance<typeof EngineAnalysisModel>;
+export type MultiplayerPlayer = Instance<typeof MultiplayerPlayerModel>;
+export type MultiplayerMove = Instance<typeof MultiplayerMoveModel>;
 
 export default RootStoreModel;
