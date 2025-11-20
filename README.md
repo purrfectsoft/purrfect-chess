@@ -108,6 +108,48 @@ The app uses Next.js, React, TypeScript, Tailwind CSS, MobX, and chess.js. Stock
 
 All piece and square PNGs live under `/public/assets/` and are licensed under CC BY 4.0 (see `LICENSE.md`).
 
+## Supabase Setup (Optional - For Multiplayer Features)
+
+Purrfect Chess uses Supabase for multiplayer functionality (anonymous game rooms, real-time move synchronization).
+
+### Prerequisites
+1. Create a free account at <a href="https://supabase.com">supabase.com</a>
+2. Create a new project (e.g., "purrfect-chess-dev")
+3. Choose a region closest to your target users
+
+### Configuration
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env.local
+   ```
+
+2. Get your Supabase credentials:
+   - Go to your Supabase project settings
+   - Navigate to "API" section
+   - Copy the "Project URL" and "anon public" key
+
+3. Add credentials to `.env.local`:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+4. Restart the development server:
+   ```bash
+   yarn dev
+   ```
+
+### Verification
+- The app will start without errors if Supabase is configured correctly
+- Check the browser console for any Supabase connection errors
+- Multiplayer features will be enabled once the database schema is set up (see issue #126)
+
+**Note**: The app works fully offline without Supabase configuration - multiplayer features simply won't be available.
+
+### Resources
+- <a href="https://supabase.com/docs/guides/getting-started/quickstarts/nextjs">Supabase Next.js Quick Start</a>
+- <a href="https://supabase.com/docs/reference/javascript/introduction">Supabase JavaScript Client Docs</a>
+
 ### Hidden engine panel
 
 Select the grey text inside the board column that reads `(Reserved for future use)` and, while it is highlighted, type `gmmamun`. The Stockfish controls will appear, letting you choose the search depth and view the top three moves.
