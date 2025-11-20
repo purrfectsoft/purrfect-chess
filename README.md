@@ -14,6 +14,26 @@ Built with **Next.js 14**, **React 18**, **TypeScript**, and **MobX** for improv
 
 See [`docs/phase-x/phase-x-audit.md`](./docs/phase-x/phase-x-audit.md) for the complete Phase X audit report.
 
+## Multiplayer — Phase 1 (Anonymous Play)
+
+Started Phase 1 of the multiplayer effort to enable anonymous (guest) game rooms using Supabase Realtime. The parent epic is tracked in issue #111 and has been split into Phase 1 sub-issues for implementation and verification.
+
+Sub-issues:
+
+- #125 — Setup Supabase project and configure environment
+- #126 — Create Database Schema for Game Sessions
+- #127 — Implement Supabase Realtime Integration
+- #128 — Create Multiplayer MobX Store
+- #129 — Build Game Room Creation and Join UI
+- #130 — Implement Real-time Move Synchronization
+- #131 — Add Connection Status Indicators
+- #132 — Implement Resign and Draw Offers
+- #133 — Add Game State Sync & Reconnection Handling
+- #134 — Handle Edge Cases (Disconnect, Tab Close, etc.)
+- #135 — Add E2E tests for Multiplayer Flow
+- #136 — Performance Testing and Optimization
+- #137 — UI/UX Polish and Error Handling
+
 ## Legacy Implementation
 
 The original Vite/HTML implementation has been preserved on the [`legacy`](https://github.com/purrfectsoft/purrfect-chess/tree/legacy) branch. To view or run the legacy version:
