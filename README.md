@@ -16,24 +16,23 @@ See [`docs/phase-x/phase-x-audit.md`](./docs/phase-x/phase-x-audit.md) for the c
 
 ## Multiplayer — Phase 1 (Anonymous Play)
 
-We started Phase 1 of the multiplayer effort to enable anonymous (guest) game rooms using Supabase Realtime. The parent epic is tracked in issue #111 and has been split into Phase 1 sub-issues for implementation and verification.
+Started Phase 1 of the multiplayer effort to enable anonymous (guest) game rooms using Supabase Realtime. The parent epic is tracked in issue #111 and has been split into Phase 1 sub-issues for implementation and verification.
 
-Sub-issues (no labels or milestones were assigned as requested):
+Sub-issues:
 
-- #112 — Create Database Schema for Game Sessions
-- #113 — Implement Supabase Realtime Integration
-- #114 — Create Multiplayer MobX Store
-- #115 — Build Game Room Creation and Join UI
-- #116 — Implement Real-time Move Synchronization
-- #117 — Add Connection Status Indicators
-- #118 — Implement Resign and Draw Offers
-- #119 — Add Game State Sync & Reconnection Handling
-- #120 — Handle Edge Cases (Disconnect, Tab Close, etc.)
-- #121 — Add E2E tests for Multiplayer Flow
-- #122 — Performance Testing and Optimization
-- #123 — UI/UX Polish and Error Handling
-
-If you want these issues opened with labels, milestones, or different titles, say the word and I can update them.
+- #125 — Setup Supabase project and configure environment
+- #126 — Create Database Schema for Game Sessions
+- #127 — Implement Supabase Realtime Integration
+- #128 — Create Multiplayer MobX Store
+- #129 — Build Game Room Creation and Join UI
+- #130 — Implement Real-time Move Synchronization
+- #131 — Add Connection Status Indicators
+- #132 — Implement Resign and Draw Offers
+- #133 — Add Game State Sync & Reconnection Handling
+- #134 — Handle Edge Cases (Disconnect, Tab Close, etc.)
+- #135 — Add E2E tests for Multiplayer Flow
+- #136 — Performance Testing and Optimization
+- #137 — UI/UX Polish and Error Handling
 
 ## Legacy Implementation
 
