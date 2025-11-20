@@ -165,14 +165,16 @@ export class RealtimeChannelManager {
       channel
         .on('presence', { event: 'join' }, ({ key, newPresences }) => {
           console.log(`[Realtime] Presence join: ${key}`, newPresences);
-          newPresences.forEach((presence: PresenceState) => {
-            callbacks.onPresenceJoin?.(presence.playerId, presence);
+          newPresences.forEach((presence) => {
+            const state = presence as unknown as PresenceState;
+            callbacks.onPresenceJoin?.(state.playerId, state);
           });
         })
         .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
           console.log(`[Realtime] Presence leave: ${key}`, leftPresences);
-          leftPresences.forEach((presence: PresenceState) => {
-            callbacks.onPresenceLeave?.(presence.playerId);
+          leftPresences.forEach((presence) => {
+            const state = presence as unknown as PresenceState;
+            callbacks.onPresenceLeave?.(state.playerId);
           });
         });
     }

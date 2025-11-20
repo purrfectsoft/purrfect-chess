@@ -57,7 +57,7 @@ const RoomManager = observer(function RoomManager({
       playerId: multiplayer.localPlayerId,
       displayName,
       online_at: new Date().toISOString(),
-      color: multiplayer.localPlayer?.color || undefined,
+      color: multiplayer.localPlayer?.color as 'white' | 'black' | undefined,
     } : undefined,
     onPlayerJoin: (payload) => {
       // Update store when a player joins
@@ -95,7 +95,7 @@ const RoomManager = observer(function RoomManager({
         multiplayer.addOrUpdatePlayer(
           playerId,
           player.displayName,
-          player.color || undefined,
+          (player.color as 'white' | 'black' | null) || null,
           false // offline
         );
       }
@@ -183,7 +183,7 @@ const RoomManager = observer(function RoomManager({
         broadcastPlayerJoin({
           playerId: multiplayer.localPlayerId,
           displayName,
-          color: multiplayer.localPlayer?.color || null,
+          color: (multiplayer.localPlayer?.color as 'white' | 'black') || null,
         });
       }
       onShowMessage?.('success', 'Reconnected successfully');
