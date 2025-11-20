@@ -53,6 +53,12 @@ const RoomManager = observer(function RoomManager({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
+    presenceState: multiplayer.localPlayerId && displayName ? {
+      playerId: multiplayer.localPlayerId,
+      displayName,
+      online_at: new Date().toISOString(),
+      color: multiplayer.localPlayer?.color || undefined,
+    } : undefined,
     onPlayerJoin: (payload) => {
       // Update store when a player joins
       multiplayer.addOrUpdatePlayer(
@@ -70,6 +76,29 @@ const RoomManager = observer(function RoomManager({
         onShowMessage?.('info', `${player.displayName} left the room`);
       }
       multiplayer.removePlayer(payload.playerId);
+    },
+    onPresenceJoin: (playerId, state) => {
+      // Update player online status via presence
+      console.log('[RoomManager] Player presence joined:', playerId, state);
+      multiplayer.addOrUpdatePlayer(
+        playerId,
+        state.displayName,
+        state.color,
+        true // online
+      );
+    },
+    onPresenceLeave: (playerId) => {
+      // Mark player as offline via presence
+      console.log('[RoomManager] Player presence left:', playerId);
+      const player = multiplayer.players.get(playerId);
+      if (player) {
+        multiplayer.addOrUpdatePlayer(
+          playerId,
+          player.displayName,
+          player.color || undefined,
+          false // offline
+        );
+      }
     },
     onConnectionChange: (status) => {
       multiplayer.setConnectionStatus(status);
