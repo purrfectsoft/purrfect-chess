@@ -1,6 +1,7 @@
 import { types, Instance, SnapshotIn, flow } from 'mobx-state-tree';
 import { Chess } from 'chess.js';
 import type { SessionState } from '@/lib/supabase/types';
+import { MoveQueue, createMoveQueue } from '@/lib/multiplayer/moveSync';
 
 /**
  * Promisified delay function for use in MST flows
@@ -560,6 +561,10 @@ const MultiplayerStateModel = types
     // Activity tracking
     lastActivityAt: types.optional(types.string, () => new Date().toISOString()),
   })
+  .volatile(() => ({
+    // Move queue for synchronization (not persisted)
+    moveQueue: createMoveQueue() as MoveQueue,
+  }))
   .views((self) => ({
     get isConnected() {
       return self.connectionStatus === 'connected';
@@ -732,6 +737,52 @@ const MultiplayerStateModel = types
     },
 
     /**
+     * Enqueue a remote move for processing
+     */
+    enqueueRemoteMove(
+      from: string,
+      to: string,
+      san: string,
+      fen: string,
+      senderId: string,
+      timestamp: string,
+      promotion?: string,
+      timeRemainingMs?: number
+    ) {
+      const payload = {
+        sessionId: self.sessionId || '',
+        from,
+        to,
+        san,
+        fen,
+        promotion,
+        timeRemainingMs,
+      };
+
+      self.moveQueue.enqueue(payload, senderId, timestamp);
+      self.lastActivityAt = new Date().toISOString();
+
+      console.log(
+        `[MultiplayerStore] Enqueued remote move: ${from}-${to} from ${senderId}`
+      );
+    },
+
+    /**
+     * Get the move queue for external processing
+     */
+    getMoveQueue(): MoveQueue {
+      return self.moveQueue;
+    },
+
+    /**
+     * Clear the move queue
+     */
+    clearMoveQueue() {
+      self.moveQueue.clear();
+      console.log('[MultiplayerStore] Move queue cleared');
+    },
+
+    /**
      * Reset the multiplayer state to initial values
      */
     reset() {
@@ -741,6 +792,7 @@ const MultiplayerStateModel = types
       self.localPlayerId = null;
       self.players.clear();
       self.moves.clear();
+      self.moveQueue.clear();
       self.connectionStatus = 'disconnected';
       self.lastActivityAt = new Date().toISOString();
       console.log('[MultiplayerStore] State reset');
