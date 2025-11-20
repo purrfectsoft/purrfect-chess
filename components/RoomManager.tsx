@@ -5,6 +5,7 @@ import { observer } from 'mobx-react-lite';
 import { useRootStore } from '@/stores/store-setup';
 import { useRoom } from '@/hooks/useRoom';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
+import ConnectionStatusBadge from './ConnectionStatusBadge';
 
 interface RoomManagerProps {
   /** Callback when room is created or joined */
@@ -144,6 +145,25 @@ const RoomManager = observer(function RoomManager({
     onShowMessage?.('info', 'Left the room');
   }, [disconnect, leaveRoom, onShowMessage]);
 
+  const handleReconnect = useCallback(async () => {
+    try {
+      onShowMessage?.('info', 'Reconnecting...');
+      await connect();
+      // Broadcast that we're back
+      if (multiplayer.localPlayerId && displayName) {
+        broadcastPlayerJoin({
+          playerId: multiplayer.localPlayerId,
+          displayName,
+          color: multiplayer.localPlayer?.color || null,
+        });
+      }
+      onShowMessage?.('success', 'Reconnected successfully');
+    } catch (err) {
+      console.error('Failed to reconnect:', err);
+      onShowMessage?.('error', 'Failed to reconnect');
+    }
+  }, [connect, multiplayer.localPlayerId, multiplayer.localPlayer, displayName, broadcastPlayerJoin, onShowMessage]);
+
   const handleCopyShareLink = useCallback(async () => {
     if (!roomId) return;
 
@@ -281,6 +301,13 @@ const RoomManager = observer(function RoomManager({
         </>
       ) : (
         <>
+          {/* Connection Status Badge */}
+          <ConnectionStatusBadge 
+            onReconnect={handleReconnect}
+            size="md"
+            position="inline"
+          />
+          
           {/* Room info */}
           <div className="flex flex-col gap-2 p-3 rounded" style={{ background: '#333' }}>
             <div className="flex justify-between items-center">
@@ -291,17 +318,6 @@ const RoomManager = observer(function RoomManager({
               <span className="text-sm text-gray-300">Status:</span>
               <span className="text-sm font-semibold text-yellow-400">
                 {multiplayer.sessionState === 'waiting' ? 'Waiting for opponent...' : multiplayer.sessionState}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-300">Connection:</span>
-              <span
-                className="text-sm font-semibold"
-                style={{
-                  color: connectionStatus === 'connected' ? '#4CAF50' : '#ff9800',
-                }}
-              >
-                {connectionStatus}
               </span>
             </div>
           </div>
