@@ -571,9 +571,7 @@ const MultiplayerStateModel = types
       return self.localPlayerId ? self.players.get(self.localPlayerId) : null;
     },
     get remotePlayers() {
-      const players: typeof self.players extends types.IMapType<infer T>
-        ? Instance<T>[]
-        : never[] = [];
+      const players: Instance<typeof MultiplayerPlayerModel>[] = [];
       self.players.forEach((player) => {
         if (player.id !== self.localPlayerId) {
           players.push(player);
