@@ -560,6 +560,16 @@ const MultiplayerStateModel = types
 
     // Activity tracking
     lastActivityAt: types.optional(types.string, () => new Date().toISOString()),
+
+    // Draw offer tracking (transient - not persisted)
+    pendingDrawOffer: types.optional(types.boolean, false),
+    drawOfferedBy: types.maybeNull(types.string),
+
+    // Game result tracking
+    gameResult: types.maybeNull(
+      types.enumeration('GameResult', ['1-0', '0-1', '1/2-1/2', '*'])
+    ),
+    resultReason: types.maybeNull(types.string),
   })
   .volatile(() => ({
     // Move queue for synchronization (not persisted)
@@ -598,6 +608,24 @@ const MultiplayerStateModel = types
         }
       });
       return foundPlayer;
+    },
+    /**
+     * Check if there is a pending draw offer
+     */
+    get hasPendingDrawOffer() {
+      return self.pendingDrawOffer && self.drawOfferedBy !== null;
+    },
+    /**
+     * Check if the local player offered the draw
+     */
+    get isDrawOfferedByLocalPlayer() {
+      return self.pendingDrawOffer && self.drawOfferedBy === self.localPlayerId;
+    },
+    /**
+     * Check if the draw offer is from a remote player
+     */
+    get isDrawOfferedByRemotePlayer() {
+      return self.pendingDrawOffer && self.drawOfferedBy !== self.localPlayerId;
     },
   }))
   .actions((self) => ({
@@ -783,6 +811,119 @@ const MultiplayerStateModel = types
     },
 
     /**
+     * Offer a draw to the opponent
+     */
+    offerDraw() {
+      if (self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] Draw offer already pending');
+        return false;
+      }
+      
+      self.pendingDrawOffer = true;
+      self.drawOfferedBy = self.localPlayerId;
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer initiated by local player');
+      return true;
+    },
+
+    /**
+     * Receive a draw offer from remote player
+     */
+    receiveDrawOffer(playerId: string) {
+      if (self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] Draw offer already pending');
+        return;
+      }
+      
+      self.pendingDrawOffer = true;
+      self.drawOfferedBy = playerId;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Draw offer received from ${playerId}`);
+    },
+
+    /**
+     * Accept a draw offer
+     */
+    acceptDraw() {
+      if (!self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] No pending draw offer to accept');
+        return false;
+      }
+      
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.gameResult = '1/2-1/2';
+      self.resultReason = 'Draw by agreement';
+      self.sessionState = 'completed';
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer accepted');
+      return true;
+    },
+
+    /**
+     * Decline a draw offer
+     */
+    declineDraw() {
+      if (!self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] No pending draw offer to decline');
+        return false;
+      }
+      
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer declined');
+      return true;
+    },
+
+    /**
+     * Resign the game
+     */
+    resign() {
+      const localPlayer = self.localPlayer;
+      if (!localPlayer || !localPlayer.color) {
+        console.warn('[MultiplayerStore] Cannot resign - no local player color assigned');
+        return false;
+      }
+      
+      // Determine the result based on who resigned
+      self.gameResult = localPlayer.color === 'white' ? '0-1' : '1-0';
+      self.resultReason = `${localPlayer.color === 'white' ? 'White' : 'Black'} resigned`;
+      self.sessionState = 'completed';
+      
+      // Clear any pending draw offer
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Local player resigned: ${self.gameResult}`);
+      return true;
+    },
+
+    /**
+     * Process a remote player's resignation
+     */
+    processRemoteResign(playerId: string) {
+      const resigningPlayer = self.players.get(playerId);
+      if (!resigningPlayer || !resigningPlayer.color) {
+        console.warn('[MultiplayerStore] Cannot process resignation - player not found or no color');
+        return;
+      }
+      
+      // Determine the result based on who resigned
+      self.gameResult = resigningPlayer.color === 'white' ? '0-1' : '1-0';
+      self.resultReason = `${resigningPlayer.color === 'white' ? 'White' : 'Black'} resigned`;
+      self.sessionState = 'completed';
+      
+      // Clear any pending draw offer
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Remote player resigned: ${self.gameResult}`);
+    },
+
+    /**
      * Reset the multiplayer state to initial values
      */
     reset() {
@@ -794,6 +935,10 @@ const MultiplayerStateModel = types
       self.moves.clear();
       self.moveQueue.clear();
       self.connectionStatus = 'disconnected';
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.gameResult = null;
+      self.resultReason = null;
       self.lastActivityAt = new Date().toISOString();
       console.log('[MultiplayerStore] State reset');
     },
@@ -859,6 +1004,10 @@ export const createDefaultSnapshot = () => ({
     moves: [],
     connectionStatus: 'disconnected' as const,
     lastActivityAt: new Date().toISOString(),
+    pendingDrawOffer: false,
+    drawOfferedBy: null,
+    gameResult: null,
+    resultReason: null,
   },
 });
 
