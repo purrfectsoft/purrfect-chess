@@ -1,29 +1,22 @@
 /**
  * Stockfish Web Worker
  *
- * Integrates Stockfish 17.1 (lite-single WASM variant) for engine analysis.
+ * Integrates Stockfish 17.1 with support for multiple variants.
  * Uses the chess.com maintained stockfish binaries loaded from /public/libs/
  *
- * Stockfish Details:
- * - Version: 17.1 (hash: 03e3232)
- * - Variant: Lite Single-threaded WASM
- * - Size: ~7MB WASM + ~21KB JS wrapper
- * - Threading: Single-threaded (no SharedArrayBuffer required)
- * - CORS: Does not require special CORS headers
- * - Strength: Weaker than full version but suitable for browser-based analysis
- * - NNUE: Smaller neural network evaluation
- *
- * This variant was chosen for:
- * 1. No CORS header requirements (works in all deployment scenarios)
- * 2. Reasonable file size (~7MB vs ~75MB for full version)
- * 3. Full WASM support (faster than asm.js fallback)
- * 4. Single-threaded (simpler threading model, better compatibility)
+ * Supported Variants:
+ * - wasm: Full Multi-threaded WASM (strongest, requires CORS)
+ * - single: Full Single-threaded WASM (strongest without CORS) - DEFAULT
+ * - lite: Lite Multi-threaded WASM (moderate, requires CORS)
+ * - lite-single: Lite Single-threaded WASM (moderate, no CORS)
+ * - asm: ASM.js Fallback (weakest, universal compatibility)
  *
  * Key features:
  * - UCI protocol implementation
  * - Multi-PV analysis support
  * - Depth-based and time-based analysis
  * - Real-time analysis updates
+ * - Dynamic variant selection
  */
 
 import { parseInfoLine, parseBestMove } from '@/lib/uci-parser';
@@ -35,19 +28,23 @@ const ctx: Worker = self as any;
 let stockfishEngine: Worker | null = null;
 let isReady = false;
 let isAnalyzing = false;
+let currentVariant: string = 'single'; // Track current variant
 
 /**
  * Initialize Stockfish engine from public/libs/
+ * @param variant - Variant ID to load (e.g., 'single', 'lite-single', etc.)
  */
-function initStockfish() {
+function initStockfish(variant: string = 'single') {
   try {
+    currentVariant = variant;
     console.log(
-      '[Stockfish Worker] Initializing Stockfish 17.1 (lite-single WASM)...'
+      `[Stockfish Worker] Initializing Stockfish 17.1 (variant: ${variant})...`
     );
 
     // Load the stockfish worker from public/libs/
-    // Using lite-single variant: single-threaded WASM, ~7MB, no CORS required
-    stockfishEngine = new Worker('/libs/stockfish-lite-single.js');
+    // Path format: /libs/stockfish-{variant}.js
+    const workerPath = `/libs/stockfish-${variant}.js`;
+    stockfishEngine = new Worker(workerPath);
 
     // Set up message handler
     stockfishEngine.onmessage = (event: MessageEvent) => {
@@ -60,7 +57,7 @@ function initStockfish() {
       isReady = false;
       ctx.postMessage({
         type: 'error',
-        error: 'Stockfish engine error: ' + error.message,
+        error: `Stockfish engine error (${variant}): ` + error.message,
       });
     };
 
@@ -71,7 +68,7 @@ function initStockfish() {
     isReady = false;
     ctx.postMessage({
       type: 'error',
-      error: 'Failed to initialize Stockfish: ' + (error as Error).message,
+      error: `Failed to initialize Stockfish (${variant}): ` + (error as Error).message,
     });
   }
 }
@@ -99,9 +96,9 @@ function handleStockfishMessage(message: string | { data?: string }) {
     if (!isReady) {
       isReady = true;
       console.log(
-        '[Stockfish Worker] Engine ready (Stockfish 17.1 lite-single WASM)'
+        `[Stockfish Worker] Engine ready (Stockfish 17.1 ${currentVariant})`
       );
-      ctx.postMessage({ type: 'ready' });
+      ctx.postMessage({ type: 'ready', variant: currentVariant });
     }
     return;
   }
@@ -146,7 +143,9 @@ ctx.onmessage = (event: MessageEvent) => {
 
   switch (type) {
     case 'init':
-      initStockfish();
+      // Accept variant parameter, default to 'single' if not provided
+      const variant = data?.variant || 'single';
+      initStockfish(variant);
       break;
 
     case 'analyze': {

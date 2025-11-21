@@ -414,6 +414,8 @@ const EngineStateModel = types
     analysis: types.array(EngineAnalysisModel),
     currentDepth: types.optional(types.number, 0),
     currentFen: types.optional(types.string, ''),
+    // Stockfish variant selection (persisted)
+    selectedVariant: types.optional(types.string, 'single'), // Default to full single-threaded WASM
   })
   .views((self) => ({
     get engineHighlights() {
@@ -446,6 +448,9 @@ const EngineStateModel = types
     },
     setCurrentFen(fen: string) {
       self.currentFen = fen;
+    },
+    setSelectedVariant(variant: string) {
+      self.selectedVariant = variant;
     },
     clearAnalysis() {
       self.analysis.clear();
@@ -530,6 +535,7 @@ export const createDefaultSnapshot = () => ({
     analysis: [],
     currentDepth: 0,
     currentFen: '',
+    selectedVariant: 'single', // Default to full single-threaded WASM
   },
 });
 

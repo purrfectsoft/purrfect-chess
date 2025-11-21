@@ -203,7 +203,11 @@ export function useEngine(options: UseEngineOptions = {}): UseEngineReturn {
         }
       };
 
-      worker.postMessage({ type: 'init' });
+      // Pass selected variant to worker init
+      worker.postMessage({
+        type: 'init',
+        data: { variant: engine.selectedVariant },
+      });
       workerRef.current = worker;
 
       return () => {
@@ -222,6 +226,63 @@ export function useEngine(options: UseEngineOptions = {}): UseEngineReturn {
       }
     }
   }, [handleWorkerMessage, engine]);
+
+  // Handle variant changes - restart worker with new variant
+  const prevVariantRef = useRef(engine.selectedVariant);
+  useEffect(() => {
+    // Only restart if variant actually changed and worker is initialized
+    if (
+      workerRef.current &&
+      prevVariantRef.current !== engine.selectedVariant
+    ) {
+      console.log(
+        `[useEngine] Variant changed from ${prevVariantRef.current} to ${engine.selectedVariant}, restarting worker...`
+      );
+
+      // Terminate old worker
+      workerRef.current.terminate();
+      workerRef.current = null;
+
+      // Reset engine state
+      engine.setEngineReady(false);
+      engine.setAnalyzing(false);
+      engine.clearAnalysis();
+
+      // Create new worker with new variant
+      try {
+        const worker = new Worker(
+          new URL('../workers/stockfish.worker.ts', import.meta.url)
+        );
+
+        worker.onmessage = (event) => {
+          handleWorkerMessage(event.data);
+        };
+
+        worker.onerror = (error) => {
+          console.error('[useEngine] Worker error:', error);
+          engine.setEngineReady(false);
+          engine.setAnalyzing(false);
+          if (onErrorRef.current) {
+            onErrorRef.current('Engine worker error occurred');
+          }
+        };
+
+        worker.postMessage({
+          type: 'init',
+          data: { variant: engine.selectedVariant },
+        });
+        workerRef.current = worker;
+
+        prevVariantRef.current = engine.selectedVariant;
+      } catch (error) {
+        console.error('[useEngine] Failed to restart worker:', error);
+        engine.setEngineReady(false);
+        if (onErrorRef.current) {
+          onErrorRef.current('Unable to restart Stockfish.');
+        }
+      }
+    }
+  }, [engine.selectedVariant, handleWorkerMessage, engine]);
 
   const startAnalysis = useCallback(
     (fen: string, analysisDepth?: number, multipv: number = 3) => {
