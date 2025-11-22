@@ -113,6 +113,32 @@ const RoomManager = observer(function RoomManager({
   });
 
   // Sync existing players from the session
+  // Helper function to fetch and add a player to the store
+  const fetchAndAddPlayer = useCallback(async (
+    playerId: string,
+    color: 'white' | 'black'
+  ) => {
+    try {
+      const { data: player, error: playerError } = await supabase
+        .from('players')
+        .select('id, display_name, is_online')
+        .eq('id', playerId)
+        .single();
+
+      if (!playerError && player) {
+        console.log(`[RoomManager] Synced ${color} player: ${player.display_name}`);
+        multiplayer.addOrUpdatePlayer(
+          player.id,
+          player.display_name,
+          color,
+          player.is_online
+        );
+      }
+    } catch (error) {
+      console.error(`[RoomManager] Failed to fetch ${color} player:`, error);
+    }
+  }, [multiplayer]);
+
   const syncExistingPlayers = useCallback(async () => {
     if (!sessionId || !multiplayer.localPlayerId) {
       console.warn('[RoomManager] Cannot sync players - missing session or player ID');
@@ -122,10 +148,10 @@ const RoomManager = observer(function RoomManager({
     try {
       console.log('[RoomManager] Syncing existing players from session');
       
-      // Fetch current session state
+      // Fetch current session state (only player IDs needed)
       const { data: session, error: fetchError } = await supabase
         .from('sessions')
-        .select('*')
+        .select('white_player_id, black_player_id')
         .eq('id', sessionId)
         .single();
 
@@ -136,53 +162,17 @@ const RoomManager = observer(function RoomManager({
 
       // Fetch white player if exists and is not local player
       if (session.white_player_id && session.white_player_id !== multiplayer.localPlayerId) {
-        try {
-          const { data: whitePlayer, error: whiteError } = await supabase
-            .from('players')
-            .select('*')
-            .eq('id', session.white_player_id)
-            .single();
-
-          if (!whiteError && whitePlayer) {
-            console.log(`[RoomManager] Synced white player: ${whitePlayer.display_name}`);
-            multiplayer.addOrUpdatePlayer(
-              whitePlayer.id,
-              whitePlayer.display_name,
-              'white',
-              whitePlayer.is_online
-            );
-          }
-        } catch (error) {
-          console.error('[RoomManager] Failed to fetch white player:', error);
-        }
+        await fetchAndAddPlayer(session.white_player_id, 'white');
       }
 
       // Fetch black player if exists and is not local player
       if (session.black_player_id && session.black_player_id !== multiplayer.localPlayerId) {
-        try {
-          const { data: blackPlayer, error: blackError } = await supabase
-            .from('players')
-            .select('*')
-            .eq('id', session.black_player_id)
-            .single();
-
-          if (!blackError && blackPlayer) {
-            console.log(`[RoomManager] Synced black player: ${blackPlayer.display_name}`);
-            multiplayer.addOrUpdatePlayer(
-              blackPlayer.id,
-              blackPlayer.display_name,
-              'black',
-              blackPlayer.is_online
-            );
-          }
-        } catch (error) {
-          console.error('[RoomManager] Failed to fetch black player:', error);
-        }
+        await fetchAndAddPlayer(session.black_player_id, 'black');
       }
     } catch (error) {
       console.error('[RoomManager] Error in syncExistingPlayers:', error);
     }
-  }, [sessionId, multiplayer]);
+  }, [sessionId, multiplayer, fetchAndAddPlayer]);
 
   // Assign player to a color and update session
   const assignPlayerToSession = useCallback(async () => {
