@@ -174,7 +174,6 @@ RETURNS JSON AS $$
 DECLARE
   v_session RECORD;
   v_assigned_color TEXT := NULL;
-  v_should_activate BOOLEAN := FALSE;
 BEGIN
   -- Lock the session row for update to prevent race conditions
   -- This ensures only one transaction can modify the session at a time
@@ -205,9 +204,8 @@ BEGIN
     SET black_player_id = p_player_id
     WHERE id = p_session_id;
     
-    -- Check if we should activate the session (both players assigned)
+    -- Activate the session since both players are now assigned
     IF v_session.white_player_id IS NOT NULL THEN
-      v_should_activate := TRUE;
       UPDATE sessions
       SET state = 'active',
           started_at = NOW()
