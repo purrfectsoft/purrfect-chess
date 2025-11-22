@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useRootStore } from '@/stores/store-setup';
 import { useRoom } from '@/hooks/useRoom';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
+import { supabase } from '@/lib/supabase/client';
 import ConnectionStatusBadge from './ConnectionStatusBadge';
 
 interface RoomManagerProps {
@@ -47,6 +48,12 @@ const RoomManager = observer(function RoomManager({
   const [joinRoomInput, setJoinRoomInput] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
+
+  // Track connection attempts to prevent re-connecting to the same room
+  const connectionAttemptRef = useRef<{ roomId: string | null; attempted: boolean }>({
+    roomId: null,
+    attempted: false,
+  });
 
   // Initialize multiplayer connection when in a room
   const { connectionStatus, connect, disconnect, broadcastPlayerJoin } = useMultiplayer({
@@ -105,28 +112,254 @@ const RoomManager = observer(function RoomManager({
     },
   });
 
+  // Assign player to a color and update session
+  const assignPlayerToSession = useCallback(async () => {
+    if (!sessionId || !multiplayer.localPlayerId) {
+      console.warn('[RoomManager] Cannot assign player - missing session or player ID');
+      return;
+    }
+
+    try {
+      // Fetch current session state
+      const { data: session, error: fetchError } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (fetchError || !session) {
+        console.error('[RoomManager] Failed to fetch session:', fetchError);
+        return;
+      }
+
+      // Determine which color to assign
+      let assignedColor: 'white' | 'black' | null = null;
+      const updates: Partial<{
+        white_player_id: string;
+        black_player_id: string;
+        state: string;
+        started_at: string;
+      }> = {};
+
+      if (!session.white_player_id) {
+        // Assign as white player
+        assignedColor = 'white';
+        updates.white_player_id = multiplayer.localPlayerId;
+        console.log(`[RoomManager] Assigning player as white`);
+      } else if (!session.black_player_id && session.white_player_id !== multiplayer.localPlayerId) {
+        // Assign as black player (only if not already white)
+        assignedColor = 'black';
+        updates.black_player_id = multiplayer.localPlayerId;
+        console.log(`[RoomManager] Assigning player as black`);
+      } else if (session.white_player_id === multiplayer.localPlayerId) {
+        // Already assigned as white
+        assignedColor = 'white';
+        console.log(`[RoomManager] Player already assigned as white`);
+      } else if (session.black_player_id === multiplayer.localPlayerId) {
+        // Already assigned as black
+        assignedColor = 'black';
+        console.log(`[RoomManager] Player already assigned as black`);
+      }
+
+      // Update session if needed
+      if (Object.keys(updates).length > 0) {
+        // Check if this completes the room (both players assigned)
+        const whitePlayer = session.white_player_id || updates.white_player_id;
+        const blackPlayer = session.black_player_id || updates.black_player_id;
+        const willHaveBothPlayers = whitePlayer && blackPlayer;
+        
+        if (willHaveBothPlayers && session.state === 'waiting') {
+          updates.state = 'active';
+          updates.started_at = new Date().toISOString();
+          console.log(`[RoomManager] Both players present, activating session`);
+        }
+
+        const { error: updateError } = await supabase
+          .from('sessions')
+          .update(updates)
+          .eq('id', sessionId);
+
+        if (updateError) {
+          console.error('[RoomManager] Failed to update session:', updateError);
+          return;
+        }
+      }
+
+      // Update local store with assigned color
+      if (assignedColor) {
+        multiplayer.addOrUpdatePlayer(
+          multiplayer.localPlayerId,
+          displayName || 'Anonymous Cat',
+          assignedColor,
+          true
+        );
+
+        // Update session state in store if we just activated it
+        if (updates.state === 'active') {
+          multiplayer.setSessionState('active');
+        }
+      }
+
+      // Broadcast player join with assigned color
+      if (assignedColor) {
+        await broadcastPlayerJoin({
+          playerId: multiplayer.localPlayerId,
+          displayName: displayName || 'Anonymous Cat',
+          color: assignedColor,
+        });
+      }
+    } catch (error) {
+      console.error('[RoomManager] Error in assignPlayerToSession:', error);
+    }
+  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin]);
+
+  // Subscribe to session changes to detect when second player joins
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    console.log(`[RoomManager] Setting up session subscription for: ${sessionId}`);
+    
+    const sessionChannel = supabase
+      .channel(`session:${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'sessions',
+          filter: `id=eq.${sessionId}`,
+        },
+        (payload) => {
+          console.log('[RoomManager] Session updated:', payload);
+          const newSession = payload.new as {
+            id: string;
+            state: string;
+            white_player_id?: string;
+            black_player_id?: string;
+          };
+          
+          // Update session state if changed
+          if (newSession.state && newSession.state !== multiplayer.sessionState) {
+            console.log(`[RoomManager] Session state changed to: ${newSession.state}`);
+            multiplayer.setSessionState(newSession.state as any);
+            
+            if (newSession.state === 'active') {
+              onShowMessage?.('success', 'Game is starting!');
+            }
+          }
+
+          // Update player colors if assigned
+          if (newSession.white_player_id === multiplayer.localPlayerId) {
+            multiplayer.addOrUpdatePlayer(
+              multiplayer.localPlayerId,
+              displayName || 'Anonymous Cat',
+              'white',
+              true
+            );
+          } else if (newSession.black_player_id === multiplayer.localPlayerId) {
+            multiplayer.addOrUpdatePlayer(
+              multiplayer.localPlayerId,
+              displayName || 'Anonymous Cat',
+              'black',
+              true
+            );
+          }
+
+          // Fetch and add the other player's information when session has both players
+          if (newSession.white_player_id && newSession.black_player_id) {
+            const otherPlayerId = newSession.white_player_id === multiplayer.localPlayerId 
+              ? newSession.black_player_id 
+              : newSession.white_player_id;
+            
+            const otherPlayerColor = newSession.white_player_id === multiplayer.localPlayerId 
+              ? 'black' 
+              : 'white';
+
+            // Fetch the other player's details from the database
+            (async () => {
+              try {
+                const { data: otherPlayer, error: playerError } = await supabase
+                  .from('players')
+                  .select('*')
+                  .eq('id', otherPlayerId)
+                  .single();
+
+                if (!playerError && otherPlayer) {
+                  console.log(`[RoomManager] Adding other player: ${otherPlayer.display_name} (${otherPlayerColor})`);
+                  multiplayer.addOrUpdatePlayer(
+                    otherPlayer.id,
+                    otherPlayer.display_name,
+                    otherPlayerColor,
+                    otherPlayer.is_online
+                  );
+                }
+              } catch (error) {
+                console.error('[RoomManager] Failed to fetch other player:', error);
+              }
+            })();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log(`[RoomManager] Cleaning up session subscription`);
+      supabase.removeChannel(sessionChannel);
+    };
+  }, [sessionId, multiplayer, displayName, onShowMessage]);
+
   // Connect to room when joining
   useEffect(() => {
-    if (isInRoom && roomId && !multiplayer.isConnected) {
-      connect().then(() => {
-        // Broadcast that we joined
-        if (multiplayer.localPlayerId && displayName) {
-          broadcastPlayerJoin({
-            playerId: multiplayer.localPlayerId,
-            displayName,
-            color: null,
-          });
-        }
+    // Reset connection attempt tracker when room changes
+    if (connectionAttemptRef.current.roomId !== roomId) {
+      connectionAttemptRef.current = {
+        roomId,
+        attempted: false,
+      };
+    }
+
+    // Only attempt connection if:
+    // 1. We're in a room
+    // 2. We have a room ID
+    // 3. We haven't already attempted to connect to this room
+    // 4. We're not already connected or connecting
+    if (
+      isInRoom &&
+      roomId &&
+      !connectionAttemptRef.current.attempted &&
+      multiplayer.connectionStatus === 'disconnected'
+    ) {
+      connectionAttemptRef.current.attempted = true;
+      
+      console.log(`[RoomManager] Initiating connection to room: ${roomId}`);
+      
+      const connectAndAssign = async () => {
+        await connect();
+        console.log(`[RoomManager] Connected successfully to room: ${roomId}`);
+        
+        // Assign player to color and update session
+        await assignPlayerToSession();
+      };
+      
+      connectAndAssign().catch((error) => {
+        console.error(`[RoomManager] Connection failed:`, error);
+        // Note: Don't reset attempted flag here - reconnection is handled by RealtimeChannelManager
+        // Users can manually reconnect via the reconnect button which resets the flag
       });
     }
 
     // Cleanup on unmount
     return () => {
-      if (multiplayer.isConnected) {
+      if (multiplayer.connectionStatus !== 'disconnected') {
+        console.log(`[RoomManager] Cleaning up connection on unmount`);
         disconnect();
       }
     };
-  }, [isInRoom, roomId, multiplayer.isConnected, multiplayer.localPlayerId, displayName, connect, disconnect, broadcastPlayerJoin]);
+    // Note: We only depend on connectionStatus (not isConnected) to prevent re-connection loops
+    // The effect should only run when room changes, connection status changes, or component mounts
+  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, assignPlayerToSession]);
 
   // Handle room errors
   useEffect(() => {
@@ -171,12 +404,19 @@ const RoomManager = observer(function RoomManager({
   const handleLeaveRoom = useCallback(() => {
     disconnect();
     leaveRoom();
+    // Reset connection attempt tracker
+    connectionAttemptRef.current = {
+      roomId: null,
+      attempted: false,
+    };
     onShowMessage?.('info', 'Left the room');
   }, [disconnect, leaveRoom, onShowMessage]);
 
   const handleReconnect = useCallback(async () => {
     try {
       onShowMessage?.('info', 'Reconnecting...');
+      // Reset the attempted flag to allow manual reconnection
+      connectionAttemptRef.current.attempted = false;
       await connect();
       // Broadcast that we're back
       if (multiplayer.localPlayerId && displayName) {
