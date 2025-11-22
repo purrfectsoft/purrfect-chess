@@ -319,7 +319,7 @@ const EnginePanel = observer(function EnginePanel() {
       </div>
 
       <div className="mt-4 text-xs text-center" style={{ color: '#999' }}>
-        Powered by Stockfish 17 ({getVariantById(engine.selectedVariant)?.name || 'Unknown'})
+        Powered by Stockfish 17 ({getVariantById(engine.selectedVariant)?.name || `Unknown variant: ${engine.selectedVariant}`})
       </div>
     </div>
   );

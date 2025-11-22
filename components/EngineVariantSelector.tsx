@@ -53,6 +53,12 @@ const EngineVariantSelector = observer(function EngineVariantSelector() {
         if (variant && variant.isAvailable()) {
             engine.setSelectedVariant(variantId);
             // Engine will be reinitialized on next analysis start
+        } else if (variant && !variant.isAvailable()) {
+            // Provide feedback about why the variant can't be selected
+            console.warn(
+                `Variant ${variantId} is not available: ${variant.compatibility?.disabledReason || 'Unknown reason'
+                }`
+            );
         }
     };
 
