@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useRootStore } from '@/stores/store-setup';
 import { useRoom } from '@/hooks/useRoom';
@@ -47,6 +47,12 @@ const RoomManager = observer(function RoomManager({
   const [joinRoomInput, setJoinRoomInput] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
+
+  // Track connection attempts to prevent re-connecting to the same room
+  const connectionAttemptRef = useRef<{ roomId: string | null; attempted: boolean }>({
+    roomId: null,
+    attempted: false,
+  });
 
   // Initialize multiplayer connection when in a room
   const { connectionStatus, connect, disconnect, broadcastPlayerJoin } = useMultiplayer({
@@ -107,8 +113,31 @@ const RoomManager = observer(function RoomManager({
 
   // Connect to room when joining
   useEffect(() => {
-    if (isInRoom && roomId && !multiplayer.isConnected) {
+    // Reset connection attempt tracker when room changes
+    if (connectionAttemptRef.current.roomId !== roomId) {
+      connectionAttemptRef.current = {
+        roomId,
+        attempted: false,
+      };
+    }
+
+    // Only attempt connection if:
+    // 1. We're in a room
+    // 2. We have a room ID
+    // 3. We haven't already attempted to connect to this room
+    // 4. We're not already connected or connecting
+    if (
+      isInRoom &&
+      roomId &&
+      !connectionAttemptRef.current.attempted &&
+      multiplayer.connectionStatus === 'disconnected'
+    ) {
+      connectionAttemptRef.current.attempted = true;
+      
+      console.log(`[RoomManager] Initiating connection to room: ${roomId}`);
+      
       connect().then(() => {
+        console.log(`[RoomManager] Connected successfully to room: ${roomId}`);
         // Broadcast that we joined
         if (multiplayer.localPlayerId && displayName) {
           broadcastPlayerJoin({
@@ -117,16 +146,23 @@ const RoomManager = observer(function RoomManager({
             color: null,
           });
         }
+      }).catch((error) => {
+        console.error(`[RoomManager] Connection failed:`, error);
+        // Reset attempted flag on error so reconnection can be retried
+        connectionAttemptRef.current.attempted = false;
       });
     }
 
     // Cleanup on unmount
     return () => {
       if (multiplayer.isConnected) {
+        console.log(`[RoomManager] Cleaning up connection on unmount`);
         disconnect();
       }
     };
-  }, [isInRoom, roomId, multiplayer.isConnected, multiplayer.localPlayerId, displayName, connect, disconnect, broadcastPlayerJoin]);
+    // Note: Removed multiplayer.isConnected from dependencies to prevent re-connection loop
+    // The effect should only run when room changes or component mounts
+  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, broadcastPlayerJoin, multiplayer.isConnected]);
 
   // Handle room errors
   useEffect(() => {
@@ -171,12 +207,19 @@ const RoomManager = observer(function RoomManager({
   const handleLeaveRoom = useCallback(() => {
     disconnect();
     leaveRoom();
+    // Reset connection attempt tracker
+    connectionAttemptRef.current = {
+      roomId: null,
+      attempted: false,
+    };
     onShowMessage?.('info', 'Left the room');
   }, [disconnect, leaveRoom, onShowMessage]);
 
   const handleReconnect = useCallback(async () => {
     try {
       onShowMessage?.('info', 'Reconnecting...');
+      // Reset the attempted flag to allow manual reconnection
+      connectionAttemptRef.current.attempted = false;
       await connect();
       // Broadcast that we're back
       if (multiplayer.localPlayerId && displayName) {
