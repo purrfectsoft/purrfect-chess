@@ -164,6 +164,70 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Atomically assign a player to a session (solves race condition)
+-- Returns JSON with: { "color": "white" | "black" | null, "session": {...} }
+CREATE OR REPLACE FUNCTION assign_player_to_session(
+  p_session_id UUID,
+  p_player_id UUID
+)
+RETURNS JSON AS $$
+DECLARE
+  v_session RECORD;
+  v_assigned_color TEXT := NULL;
+  v_should_activate BOOLEAN := FALSE;
+BEGIN
+  -- Lock the session row for update to prevent race conditions
+  -- This ensures only one transaction can modify the session at a time
+  SELECT * INTO v_session
+  FROM sessions
+  WHERE id = p_session_id
+  FOR UPDATE;
+  
+  -- Check if session exists
+  IF v_session.id IS NULL THEN
+    RAISE EXCEPTION 'Session not found: %', p_session_id;
+  END IF;
+  
+  -- Check if player is already assigned
+  IF v_session.white_player_id = p_player_id THEN
+    v_assigned_color := 'white';
+  ELSIF v_session.black_player_id = p_player_id THEN
+    v_assigned_color := 'black';
+  -- Assign to first available color
+  ELSIF v_session.white_player_id IS NULL THEN
+    v_assigned_color := 'white';
+    UPDATE sessions
+    SET white_player_id = p_player_id
+    WHERE id = p_session_id;
+  ELSIF v_session.black_player_id IS NULL THEN
+    v_assigned_color := 'black';
+    UPDATE sessions
+    SET black_player_id = p_player_id
+    WHERE id = p_session_id;
+    
+    -- Check if we should activate the session (both players assigned)
+    IF v_session.white_player_id IS NOT NULL THEN
+      v_should_activate := TRUE;
+      UPDATE sessions
+      SET state = 'active',
+          started_at = NOW()
+      WHERE id = p_session_id;
+    END IF;
+  END IF;
+  
+  -- Fetch the updated session
+  SELECT * INTO v_session
+  FROM sessions
+  WHERE id = p_session_id;
+  
+  -- Return result as JSON
+  RETURN json_build_object(
+    'color', v_assigned_color,
+    'session', row_to_json(v_session)
+  );
+END;
+$$ LANGUAGE plpgsql;
+
 -- ============================================================================
 -- Comments for Documentation
 -- ============================================================================

@@ -74,6 +74,7 @@ export interface UseMultiplayerReturn {
   isConnected: boolean;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  updatePresence: (presenceState: PresenceState) => Promise<void>;
   broadcastMove: (move: Omit<MovePayload, 'sessionId'>) => Promise<void>;
   broadcastSessionStateChange: (
     state: Omit<SessionStatePayload, 'sessionId'>
@@ -258,6 +259,21 @@ export function useMultiplayer(
     }
   }, [roomId, updateConnectionStatus]);
 
+  // Update presence state
+  const updatePresence = useCallback(async (newPresenceState: PresenceState) => {
+    if (!channelManagerRef.current) {
+      console.error('[useMultiplayer] Cannot update presence - not initialized');
+      return;
+    }
+
+    try {
+      await channelManagerRef.current.updatePresence(roomId, newPresenceState);
+      console.log(`[useMultiplayer] Presence updated:`, newPresenceState);
+    } catch (error) {
+      console.error('[useMultiplayer] Update presence error:', error);
+    }
+  }, [roomId]);
+
   // Broadcast a move
   const broadcastMove = useCallback(
     async (move: Omit<MovePayload, 'sessionId'>) => {
@@ -428,6 +444,7 @@ export function useMultiplayer(
     isConnected: connectionStatus === ConnectionStatus.CONNECTED,
     connect,
     disconnect,
+    updatePresence,
     broadcastMove,
     broadcastSessionStateChange,
     broadcastPlayerJoin,
