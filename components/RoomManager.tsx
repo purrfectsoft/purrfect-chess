@@ -134,7 +134,12 @@ const RoomManager = observer(function RoomManager({
 
       // Determine which color to assign
       let assignedColor: 'white' | 'black' | null = null;
-      const updates: any = {};
+      const updates: Partial<{
+        white_player_id: string;
+        black_player_id: string;
+        state: string;
+        started_at: string;
+      }> = {};
 
       if (!session.white_player_id) {
         // Assign as white player
@@ -159,8 +164,9 @@ const RoomManager = observer(function RoomManager({
       // Update session if needed
       if (Object.keys(updates).length > 0) {
         // Check if this completes the room (both players assigned)
-        const willHaveBothPlayers = (session.white_player_id || updates.white_player_id) && 
-                                     (session.black_player_id || updates.black_player_id);
+        const whitePlayer = session.white_player_id || updates.white_player_id;
+        const blackPlayer = session.black_player_id || updates.black_player_id;
+        const willHaveBothPlayers = whitePlayer && blackPlayer;
         
         if (willHaveBothPlayers && session.state === 'waiting') {
           updates.state = 'active';
@@ -227,12 +233,17 @@ const RoomManager = observer(function RoomManager({
         },
         (payload) => {
           console.log('[RoomManager] Session updated:', payload);
-          const newSession = payload.new as any;
+          const newSession = payload.new as {
+            id: string;
+            state: string;
+            white_player_id?: string;
+            black_player_id?: string;
+          };
           
           // Update session state if changed
           if (newSession.state && newSession.state !== multiplayer.sessionState) {
             console.log(`[RoomManager] Session state changed to: ${newSession.state}`);
-            multiplayer.setSessionState(newSession.state);
+            multiplayer.setSessionState(newSession.state as any);
             
             if (newSession.state === 'active') {
               onShowMessage?.('success', 'Game is starting!');
@@ -290,12 +301,15 @@ const RoomManager = observer(function RoomManager({
       
       console.log(`[RoomManager] Initiating connection to room: ${roomId}`);
       
-      connect().then(async () => {
+      const connectAndAssign = async () => {
+        await connect();
         console.log(`[RoomManager] Connected successfully to room: ${roomId}`);
         
         // Assign player to color and update session
         await assignPlayerToSession();
-      }).catch((error) => {
+      };
+      
+      connectAndAssign().catch((error) => {
         console.error(`[RoomManager] Connection failed:`, error);
         // Note: Don't reset attempted flag here - reconnection is handled by RealtimeChannelManager
         // Users can manually reconnect via the reconnect button which resets the flag
