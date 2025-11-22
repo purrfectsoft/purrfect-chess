@@ -1,4 +1,4 @@
-# Multiplayer Player Assignment Race Condition Fix
+# Multiplayer Player Assignment Fix
 
 ## Problem Description
 
@@ -10,8 +10,19 @@ When two players join a multiplayer room simultaneously:
 - Connection status toggles intermittently
 - Database session ends up with only one player assigned (e.g., both set as white, black stays null)
 
-### Root Cause
-The original implementation used a **read-then-write pattern** for player assignment:
+### Root Causes
+
+There were **TWO separate issues** causing this problem:
+
+#### Issue #1: Race Condition in Player Assignment
+The original implementation used a **read-then-write pattern** for player assignment that allowed concurrent clients to overwrite each other's assignments.
+
+#### Issue #2: Missing Presence Sync Handler
+When a client subscribed to Realtime presence, they only received events for players who joined AFTER them, missing players who were already present.
+
+## Solution #1: Atomic Database Function
+
+### The Race Condition Problem
 
 ```typescript
 // BEFORE (race condition vulnerability)
@@ -139,6 +150,72 @@ async assignPlayerToSession() {
 }
 ```
 
+## Solution #2: Presence Sync Handler
+
+### The Missing Presence Problem
+
+**Problem:** When Player B subscribes to the Realtime presence channel:
+- Supabase only fires `presence` `join` events for players who join AFTER the subscription
+- Player A who is already present does NOT trigger a `join` event for Player B
+- Result: Player B never receives Player A's information
+
+**Solution:** Handle the `presence` `sync` event which fires immediately after subscription with ALL currently present users.
+
+### Implementation
+
+Added presence sync event handler to the Realtime channel manager:
+
+```typescript
+// BEFORE (missing sync)
+channel
+  .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+    // Only handles NEW players who join after subscription
+    newPresences.forEach((presence) => {
+      callbacks.onPresenceJoin?.(presence.playerId, presence);
+    });
+  })
+  .on('presence', { event: 'leave' }, ...)
+```
+
+```typescript
+// AFTER (with sync)
+channel
+  .on('presence', { event: 'sync' }, () => {
+    // ✅ Get ALL current presences when first subscribing
+    const presenceState = channel.presenceState();
+    console.log(`[Realtime] Presence sync - current state:`, presenceState);
+    
+    // Iterate through all present users and trigger onPresenceJoin for each
+    Object.values(presenceState).forEach((presences: any) => {
+      presences.forEach((presence: any) => {
+        const state = presence as PresenceState;
+        callbacks.onPresenceJoin?.(state.playerId, state);
+      });
+    });
+  })
+  .on('presence', { event: 'join' }, ...)  // Still handle new joins
+  .on('presence', { event: 'leave' }, ...)
+```
+
+### Presence Sync Timeline
+
+```
+Time | Player A                     | Player B
+-----|------------------------------|--------------------------------
+t1   | Subscribes to presence       |
+t2   | 🔄 SYNC event (empty)        |
+t3   | Tracks presence (A)          |
+t4   |                              | Subscribes to presence
+t5   |                              | 🔄 SYNC event fires!
+t6   |                              | Gets presenceState()
+t7   |                              | Sees Player A ✅
+t8   |                              | Tracks presence (B)
+t9   | 🔔 JOIN event fires          |
+t10  | Sees Player B ✅             |
+
+Result: Both players see each other! Players (2/2) ✅
+```
+
 ## How Row-Level Locking Works
 
 ### `SELECT ... FOR UPDATE`
@@ -173,7 +250,25 @@ Result: white=playerA, black=playerB ✅ Both players correctly assigned!
 
 ## Additional Improvements
 
-### 1. Presence Update After Color Assignment
+### 1. Presence Sync Handler (Critical Fix)
+
+**Issue:** The second player to join couldn't see the first player who was already there.
+
+**Solution:** Added `presence` `sync` event handler that fires when subscribing to get all existing presences.
+
+```typescript
+.on('presence', { event: 'sync' }, () => {
+  const presenceState = channel.presenceState();
+  // Process all existing presences
+  Object.values(presenceState).forEach((presences) => {
+    presences.forEach((presence) => {
+      callbacks.onPresenceJoin?.(presence.playerId, presence);
+    });
+  });
+})
+```
+
+### 2. Presence Update After Color Assignment
 
 The initial connection uses presence without color:
 ```typescript
@@ -195,7 +290,7 @@ await updatePresence({
 });
 ```
 
-### 2. Session State Auto-Activation
+### 3. Session State Auto-Activation
 
 When the second player is assigned, the session automatically transitions to `active`:
 
@@ -208,7 +303,7 @@ IF v_session.white_player_id IS NOT NULL THEN
 END IF;
 ```
 
-### 3. Idempotent Assignment
+### 4. Idempotent Assignment
 
 If a player is already assigned (e.g., reconnecting), the function returns their existing color without modification:
 
