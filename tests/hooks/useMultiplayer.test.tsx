@@ -22,6 +22,7 @@ vi.mock('@/lib/supabase/realtime', async () => {
   class MockRealtimeChannelManager {
     joinRoom = vi.fn().mockResolvedValue({});
     leaveRoom = vi.fn().mockResolvedValue(undefined);
+    updatePresence = vi.fn().mockResolvedValue(undefined);
     broadcast = vi.fn().mockResolvedValue(undefined);
     isSubscribed = vi.fn().mockReturnValue(false);
     getActiveChannelCount = vi.fn().mockReturnValue(0);
@@ -81,6 +82,12 @@ describe('useMultiplayer hook', () => {
     expect(typeof result.current.broadcastDrawOffer).toBe('function');
     expect(typeof result.current.broadcastDrawResponse).toBe('function');
     expect(typeof result.current.broadcastResign).toBe('function');
+  });
+
+  it('should provide updatePresence method', () => {
+    const { result } = renderHook(() => useMultiplayer(defaultOptions));
+
+    expect(typeof result.current.updatePresence).toBe('function');
   });
 
   it('should expose connection status and controls', () => {

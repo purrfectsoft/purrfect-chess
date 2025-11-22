@@ -17,6 +17,7 @@ vi.mock('@/hooks/useMultiplayer', () => ({
     isConnected: false,
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    updatePresence: vi.fn().mockResolvedValue(undefined),
     broadcastPlayerJoin: vi.fn().mockResolvedValue(undefined),
     broadcastPlayerLeave: vi.fn().mockResolvedValue(undefined),
   }),
