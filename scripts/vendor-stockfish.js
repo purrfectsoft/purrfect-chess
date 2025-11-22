@@ -42,43 +42,9 @@ const TARGET_DIR = path.join(__dirname, '..', 'public', 'libs');
  * All Stockfish variants to vendor
  * Ordered by strength (strongest first)
  */
-const VARIANTS = [
-  {
-    id: 'wasm',
-    name: 'Full Multi-threaded WASM',
-    hash: '8e4d048',
-    wasmParts: 6,
-    hasWasm: true,
-  },
-  {
-    id: 'single',
-    name: 'Full Single-threaded WASM (DEFAULT)',
-    hash: 'a496a04',
-    wasmParts: 6,
-    hasWasm: true,
-  },
-  {
-    id: 'lite',
-    name: 'Lite Multi-threaded WASM',
-    hash: '51f59da',
-    wasmParts: 0,
-    hasWasm: true,
-  },
-  {
-    id: 'lite-single',
-    name: 'Lite Single-threaded WASM',
-    hash: '03e3232',
-    wasmParts: 0,
-    hasWasm: true,
-  },
-  {
-    id: 'asm',
-    name: 'ASM.js Fallback',
-    hash: '341ff22',
-    wasmParts: 0,
-    hasWasm: false,
-  },
-];
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const VARIANTS = require('../lib/stockfish-variants.json');
 
 /**
  * Get files to copy for a variant

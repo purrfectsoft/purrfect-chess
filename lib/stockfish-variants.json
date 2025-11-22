@@ -1,0 +1,91 @@
+[
+    {
+        "id": "wasm",
+        "name": "Full Multi-threaded WASM",
+        "hash": "8e4d048",
+        "wasmParts": 6,
+        "hasWasm": true,
+        "strength": 5,
+        "description": "Strongest engine. Uses multiple threads for faster calculation.",
+        "size": {
+            "label": "~75MB",
+            "bytes": 78000000
+        },
+        "compatibility": {
+            "needsCORS": true,
+            "needsSharedArrayBuffer": true,
+            "disabledReason": "Requires CORS headers",
+            "disabledTooltip": "This variant requires 'Cross-Origin-Opener-Policy: same-origin' and 'Cross-Origin-Embedder-Policy: require-corp' headers."
+        }
+    },
+    {
+        "id": "single",
+        "name": "Full Single-threaded WASM",
+        "hash": "a496a04",
+        "wasmParts": 6,
+        "hasWasm": true,
+        "strength": 4,
+        "description": "Strong engine. Compatible with most modern browsers.",
+        "size": {
+            "label": "~75MB",
+            "bytes": 78000000
+        },
+        "compatibility": {
+            "needsCORS": false,
+            "needsSharedArrayBuffer": false
+        }
+    },
+    {
+        "id": "lite",
+        "name": "Lite Multi-threaded WASM",
+        "hash": "51f59da",
+        "wasmParts": 0,
+        "hasWasm": true,
+        "strength": 3,
+        "description": "Lightweight engine. Uses multiple threads.",
+        "size": {
+            "label": "~7MB",
+            "bytes": 7000000
+        },
+        "compatibility": {
+            "needsCORS": true,
+            "needsSharedArrayBuffer": true,
+            "disabledReason": "Requires CORS headers",
+            "disabledTooltip": "This variant requires 'Cross-Origin-Opener-Policy: same-origin' and 'Cross-Origin-Embedder-Policy: require-corp' headers."
+        }
+    },
+    {
+        "id": "lite-single",
+        "name": "Lite Single-threaded WASM",
+        "hash": "03e3232",
+        "wasmParts": 0,
+        "hasWasm": true,
+        "strength": 2,
+        "description": "Lightweight engine. Compatible with most modern browsers.",
+        "size": {
+            "label": "~7MB",
+            "bytes": 7000000
+        },
+        "compatibility": {
+            "needsCORS": false,
+            "needsSharedArrayBuffer": false
+        }
+    },
+    {
+        "id": "asm",
+        "name": "ASM.js Fallback",
+        "hash": "341ff22",
+        "wasmParts": 0,
+        "hasWasm": false,
+        "strength": 1,
+        "description": "Slowest engine. Compatible with very old browsers.",
+        "size": {
+            "label": "~10MB",
+            "bytes": 10000000
+        },
+        "compatibility": {
+            "needsCORS": false,
+            "needsSharedArrayBuffer": false
+        }
+    }
+]

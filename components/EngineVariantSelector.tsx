@@ -23,57 +23,7 @@ import { useState } from 'react';
  * - Prevents switching during active analysis
  */
 
-interface TooltipProps {
-    text: string;
-    children: React.ReactNode;
-}
-
-/**
- * Simple tooltip component
- */
-function Tooltip({ text, children }: TooltipProps) {
-    const [isVisible, setIsVisible] = useState(false);
-
-    return (
-        <div
-            className="relative inline-block"
-            onMouseEnter={() => setIsVisible(true)}
-            onMouseLeave={() => setIsVisible(false)}
-        >
-            {children}
-            {isVisible && (
-                <div
-                    className="absolute z-50 px-3 py-2 text-xs rounded-lg shadow-lg whitespace-normal max-w-xs"
-                    style={{
-                        background: '#1a1a1a',
-                        border: '1px solid #444',
-                        color: '#ddd',
-                        bottom: '100%',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        marginBottom: '8px',
-                        pointerEvents: 'none',
-                    }}
-                >
-                    {text}
-                    <div
-                        style={{
-                            position: 'absolute',
-                            top: '100%',
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            width: 0,
-                            height: 0,
-                            borderLeft: '6px solid transparent',
-                            borderRight: '6px solid transparent',
-                            borderTop: '6px solid #444',
-                        }}
-                    />
-                </div>
-            )}
-        </div>
-    );
-}
+import { Tooltip } from '@/components/ui/Tooltip';
 
 /**
  * Get strength indicator emoji
