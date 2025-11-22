@@ -163,6 +163,20 @@ export class RealtimeChannelManager {
     // Subscribe to presence if callbacks provided
     if (callbacks.onPresenceJoin || callbacks.onPresenceLeave) {
       channel
+        .on('presence', { event: 'sync' }, () => {
+          // Get current presence state when syncing
+          const presenceState = channel.presenceState();
+          console.log(`[Realtime] Presence sync - current state:`, presenceState);
+          
+          // Iterate through all present users and trigger onPresenceJoin for each
+          Object.values(presenceState).forEach((presences: any) => {
+            presences.forEach((presence: any) => {
+              const state = presence as PresenceState;
+              console.log(`[Realtime] Synced presence for player: ${state.playerId}`);
+              callbacks.onPresenceJoin?.(state.playerId, state);
+            });
+          });
+        })
         .on('presence', { event: 'join' }, ({ key, newPresences }) => {
           console.log(`[Realtime] Presence join: ${key}`, newPresences);
           newPresences.forEach((presence) => {
