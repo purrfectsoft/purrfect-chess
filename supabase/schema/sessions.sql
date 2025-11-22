@@ -228,6 +228,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Add comment for the function
+COMMENT ON FUNCTION assign_player_to_session(UUID, UUID) IS 
+  'Atomically assigns a player to the first available color (white or black) in a session. ' ||
+  'Uses row-level locking to prevent race conditions when multiple players join simultaneously. ' ||
+  'Returns JSON with assigned color and updated session data.';
+
 -- ============================================================================
 -- Comments for Documentation
 -- ============================================================================
