@@ -266,6 +266,40 @@ const RoomManager = observer(function RoomManager({
               true
             );
           }
+
+          // Fetch and add the other player's information when session has both players
+          if (newSession.white_player_id && newSession.black_player_id) {
+            const otherPlayerId = newSession.white_player_id === multiplayer.localPlayerId 
+              ? newSession.black_player_id 
+              : newSession.white_player_id;
+            
+            const otherPlayerColor = newSession.white_player_id === multiplayer.localPlayerId 
+              ? 'black' 
+              : 'white';
+
+            // Fetch the other player's details from the database
+            (async () => {
+              try {
+                const { data: otherPlayer, error: playerError } = await supabase
+                  .from('players')
+                  .select('*')
+                  .eq('id', otherPlayerId)
+                  .single();
+
+                if (!playerError && otherPlayer) {
+                  console.log(`[RoomManager] Adding other player: ${otherPlayer.display_name} (${otherPlayerColor})`);
+                  multiplayer.addOrUpdatePlayer(
+                    otherPlayer.id,
+                    otherPlayer.display_name,
+                    otherPlayerColor,
+                    otherPlayer.is_online
+                  );
+                }
+              } catch (error) {
+                console.error('[RoomManager] Failed to fetch other player:', error);
+              }
+            })();
+          }
         }
       )
       .subscribe();
