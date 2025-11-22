@@ -148,21 +148,21 @@ const RoomManager = observer(function RoomManager({
         }
       }).catch((error) => {
         console.error(`[RoomManager] Connection failed:`, error);
-        // Reset attempted flag on error so reconnection can be retried
-        connectionAttemptRef.current.attempted = false;
+        // Note: Don't reset attempted flag here - reconnection is handled by RealtimeChannelManager
+        // Users can manually reconnect via the reconnect button which resets the flag
       });
     }
 
     // Cleanup on unmount
     return () => {
-      if (multiplayer.isConnected) {
+      if (multiplayer.connectionStatus !== 'disconnected') {
         console.log(`[RoomManager] Cleaning up connection on unmount`);
         disconnect();
       }
     };
-    // Note: Removed multiplayer.isConnected from dependencies to prevent re-connection loop
-    // The effect should only run when room changes or component mounts
-  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, broadcastPlayerJoin, multiplayer.isConnected]);
+    // Note: We only depend on connectionStatus (not isConnected) to prevent re-connection loops
+    // The effect should only run when room changes, connection status changes, or component mounts
+  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, broadcastPlayerJoin]);
 
   // Handle room errors
   useEffect(() => {
