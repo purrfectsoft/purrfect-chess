@@ -60,9 +60,9 @@ const RoomManager = observer(function RoomManager({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
-    presenceState: multiplayer.localPlayerId && displayName ? {
+    presenceState: multiplayer.localPlayerId ? {
       playerId: multiplayer.localPlayerId,
-      displayName,
+      displayName: displayName || 'Anonymous Cat',
       online_at: new Date().toISOString(),
       color: multiplayer.localPlayer?.color as 'white' | 'black' | undefined,
     } : undefined,
@@ -111,6 +111,68 @@ const RoomManager = observer(function RoomManager({
       multiplayer.setConnectionStatus(status);
     },
   });
+
+  // Sync existing players from the session
+  // Helper function to fetch and add a player to the store
+  const fetchAndAddPlayer = useCallback(async (
+    playerId: string,
+    color: 'white' | 'black'
+  ) => {
+    try {
+      const { data: player, error: playerError } = await supabase
+        .from('players')
+        .select('id, display_name, is_online')
+        .eq('id', playerId)
+        .single();
+
+      if (!playerError && player) {
+        console.log(`[RoomManager] Synced ${color} player: ${player.display_name}`);
+        multiplayer.addOrUpdatePlayer(
+          player.id,
+          player.display_name,
+          color,
+          player.is_online
+        );
+      }
+    } catch (error) {
+      console.error(`[RoomManager] Failed to fetch ${color} player:`, error);
+    }
+  }, [multiplayer]);
+
+  const syncExistingPlayers = useCallback(async () => {
+    if (!sessionId || !multiplayer.localPlayerId) {
+      console.warn('[RoomManager] Cannot sync players - missing session or player ID');
+      return;
+    }
+
+    try {
+      console.log('[RoomManager] Syncing existing players from session');
+      
+      // Fetch current session state (only player IDs needed)
+      const { data: session, error: fetchError } = await supabase
+        .from('sessions')
+        .select('white_player_id, black_player_id')
+        .eq('id', sessionId)
+        .single();
+
+      if (fetchError || !session) {
+        console.error('[RoomManager] Failed to fetch session for sync:', fetchError);
+        return;
+      }
+
+      // Fetch white player if exists and is not local player
+      if (session.white_player_id && session.white_player_id !== multiplayer.localPlayerId) {
+        await fetchAndAddPlayer(session.white_player_id, 'white');
+      }
+
+      // Fetch black player if exists and is not local player
+      if (session.black_player_id && session.black_player_id !== multiplayer.localPlayerId) {
+        await fetchAndAddPlayer(session.black_player_id, 'black');
+      }
+    } catch (error) {
+      console.error('[RoomManager] Error in syncExistingPlayers:', error);
+    }
+  }, [sessionId, multiplayer, fetchAndAddPlayer]);
 
   // Assign player to a color and update session
   const assignPlayerToSession = useCallback(async () => {
@@ -200,6 +262,10 @@ const RoomManager = observer(function RoomManager({
         }
       }
 
+      // Sync existing players BEFORE broadcasting
+      // This ensures we know about other players who joined before us
+      await syncExistingPlayers();
+
       // Broadcast player join with assigned color
       if (assignedColor) {
         await broadcastPlayerJoin({
@@ -211,7 +277,7 @@ const RoomManager = observer(function RoomManager({
     } catch (error) {
       console.error('[RoomManager] Error in assignPlayerToSession:', error);
     }
-  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin]);
+  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin, syncExistingPlayers]);
 
   // Subscribe to session changes to detect when second player joins
   useEffect(() => {
@@ -302,7 +368,9 @@ const RoomManager = observer(function RoomManager({
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[RoomManager] Session subscription status for ${sessionId}:`, status);
+      });
 
     return () => {
       console.log(`[RoomManager] Cleaning up session subscription`);
@@ -318,6 +386,11 @@ const RoomManager = observer(function RoomManager({
         roomId,
         attempted: false,
       };
+    }
+
+    // Sync players when connected
+    if (multiplayer.connectionStatus === 'connected' && sessionId) {
+      syncExistingPlayers();
     }
 
     // Only attempt connection if:
@@ -359,7 +432,7 @@ const RoomManager = observer(function RoomManager({
     };
     // Note: We only depend on connectionStatus (not isConnected) to prevent re-connection loops
     // The effect should only run when room changes, connection status changes, or component mounts
-  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, assignPlayerToSession]);
+  }, [isInRoom, roomId, sessionId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, assignPlayerToSession, syncExistingPlayers]);
 
   // Handle room errors
   useEffect(() => {
