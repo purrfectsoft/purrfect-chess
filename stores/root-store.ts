@@ -580,7 +580,7 @@ const MultiplayerStateModel = types
     ),
     resultReason: types.maybeNull(types.string),
     
-    // Game start readiness tracking (transient)
+    // Game start readiness tracking (not persisted - will reset on hydration)
     localPlayerReady: types.optional(types.boolean, false),
     remotePlayerReady: types.optional(types.boolean, false),
   })
@@ -782,13 +782,11 @@ const MultiplayerStateModel = types
       } else {
         // Client-side guard: prevent adding more than 2 seat-holders
         if (role === 'seat' && color) {
-          // Check if another player already has this color seat
-          let existingColorPlayer = null;
-          self.players.forEach((player) => {
-            if (player.color === color && player.id !== playerId) {
-              existingColorPlayer = player;
-            }
-          });
+          // Check if another player already has this color seat (using Array.find for efficiency)
+          const playersArray = Array.from(self.players.values());
+          const existingColorPlayer = playersArray.find(
+            (player) => player.color === color && player.id !== playerId
+          );
           
           if (existingColorPlayer) {
             console.warn(

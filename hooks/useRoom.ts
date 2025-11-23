@@ -77,7 +77,7 @@ export function useRoom() {
         .eq('id', playerId);
       
       if (updateError) {
-        console.warn('[useRoom] Failed to update display name:', updateError);
+        console.warn('[useRoom] Failed to update display name for player', playerId, ':', updateError);
         // Don't throw - this is not critical
       }
 

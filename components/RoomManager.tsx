@@ -8,6 +8,35 @@ import { useMultiplayer } from '@/hooks/useMultiplayer';
 import { supabase } from '@/lib/supabase/client';
 import ConnectionStatusBadge from './ConnectionStatusBadge';
 
+// Constants
+const SECONDS_PER_MINUTE = 60;
+
+/**
+ * Get session status text based on current state
+ */
+function getSessionStatusText(
+  sessionState: string,
+  localPlayerReady: boolean,
+  remotePlayerReady: boolean,
+  areBothPlayersReady: boolean
+): string {
+  if (sessionState === 'waiting') {
+    return 'Waiting for opponent...';
+  }
+  
+  if (sessionState === 'active') {
+    if (areBothPlayersReady) {
+      return 'Game active!';
+    }
+    if (localPlayerReady && !remotePlayerReady) {
+      return 'Waiting for opponent to load...';
+    }
+    return 'Loading game...';
+  }
+  
+  return sessionState;
+}
+
 interface RoomManagerProps {
   /** Callback when room is created or joined */
   onRoomJoined?: (roomId: string, sessionId: string) => void;
@@ -214,7 +243,6 @@ const RoomManager = observer(function RoomManager({
 
       // Set time controls (convert seconds to minutes)
       if (session.time_control_initial !== null) {
-        const SECONDS_PER_MINUTE = 60;
         const minutes = session.time_control_initial / SECONDS_PER_MINUTE;
         const increment = session.time_control_increment;
         console.log('[RoomManager] Setting time controls:', minutes, 'minutes +', increment, 'seconds');
@@ -771,15 +799,12 @@ const RoomManager = observer(function RoomManager({
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-300">Status:</span>
               <span className="text-sm font-semibold text-yellow-400">
-                {multiplayer.sessionState === 'waiting' 
-                  ? 'Waiting for opponent...' 
-                  : multiplayer.sessionState === 'active' 
-                    ? (multiplayer.localPlayerReady && !multiplayer.remotePlayerReady 
-                        ? 'Waiting for opponent to load...' 
-                        : multiplayer.areBothPlayersReady 
-                          ? 'Game active!' 
-                          : 'Loading game...')
-                    : multiplayer.sessionState}
+                {getSessionStatusText(
+                  multiplayer.sessionState,
+                  multiplayer.localPlayerReady,
+                  multiplayer.remotePlayerReady,
+                  multiplayer.areBothPlayersReady
+                )}
               </span>
             </div>
           </div>
