@@ -99,7 +99,7 @@ export const getSourceFilenames = (variant: StockfishVariant): string[] => {
   // FIX: Full variants (wasm and single) have filenames without the variant id in the base name
   // This matches the logic in scripts/vendor-stockfish.js
   const baseName =
-    variant.id === 'wasm' || variant.id === 'single'
+    variant.id === 'wasm'
       ? `stockfish-${version}-${variant.hash}`
       : `stockfish-${version}-${variant.id}-${variant.hash}`;
 
