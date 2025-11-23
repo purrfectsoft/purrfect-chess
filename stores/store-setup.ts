@@ -20,13 +20,14 @@ export const [RootStoreProvider, useRootStore] = createPersistentStore(
   RootStoreModel,
   defaultStorage,
   createDefaultSnapshot(),
-  // Exclude transient UI and engine state from persistence
+  // Exclude transient UI, engine, and multiplayer connection state from persistence
   // These values will replace what's in storage on hydration (always reset to defaults)
   {
     ui: {
       isEnginePanelVisible: false,
       isEvalBarVisible: false,
       isBoardFlipped: false,
+      userOverrodeFlip: false,
       engineDisplayMode: 'both' as const,
     },
     engine: {
@@ -35,6 +36,12 @@ export const [RootStoreProvider, useRootStore] = createPersistentStore(
       analysis: [],
       currentDepth: 0,
       currentFen: '',
+    },
+    multiplayer: {
+      // Reset connection status on hydration (transient)
+      connectionStatus: 'disconnected' as const,
+      // Keep session/room data for potential reconnection
+      // Players and moves are persisted for session recovery
     },
   },
   {

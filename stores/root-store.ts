@@ -1,5 +1,7 @@
 import { types, Instance, SnapshotIn, flow } from 'mobx-state-tree';
 import { Chess } from 'chess.js';
+import type { SessionState } from '@/lib/supabase/types';
+import { MoveQueue, createMoveQueue } from '@/lib/multiplayer/moveSync';
 
 /**
  * Promisified delay function for use in MST flows
@@ -299,6 +301,7 @@ const UIStateModel = types
     isEnginePanelVisible: types.optional(types.boolean, false),
     isEvalBarVisible: types.optional(types.boolean, false),
     isBoardFlipped: types.optional(types.boolean, false),
+    userOverrodeFlip: types.optional(types.boolean, false),
     engineDisplayMode: types.optional(
       types.enumeration('EngineDisplayMode', [
         'squares',
@@ -329,6 +332,13 @@ const UIStateModel = types
     },
     toggleBoardFlip() {
       self.isBoardFlipped = !self.isBoardFlipped;
+      self.userOverrodeFlip = true; // User manually toggled the flip
+    },
+    setBoardFlipped(flipped: boolean, isAutomatic: boolean = false) {
+      self.isBoardFlipped = flipped;
+      if (!isAutomatic) {
+        self.userOverrodeFlip = true;
+      }
     },
     setEngineDisplayMode(mode: 'squares' | 'arrows' | 'both' | 'none') {
       self.engineDisplayMode = mode;
@@ -482,6 +492,566 @@ const EngineStateModel = types
   }));
 
 /**
+ * Multiplayer Player Model
+ * Represents a player in a multiplayer session
+ */
+const MultiplayerPlayerModel = types.model('MultiplayerPlayer', {
+  id: types.identifier,
+  displayName: types.string,
+  color: types.maybeNull(types.enumeration('PlayerColor', ['white', 'black'])),
+  role: types.optional(types.enumeration('PlayerRole', ['seat', 'spectator']), 'spectator'),
+  isOnline: types.optional(types.boolean, true),
+  lastSeenAt: types.optional(types.string, () => new Date().toISOString()),
+});
+
+/**
+ * Multiplayer Move Model
+ * Represents a move in multiplayer history
+ */
+const MultiplayerMoveModel = types.model('MultiplayerMove', {
+  id: types.identifier,
+  from: types.string,
+  to: types.string,
+  promotion: types.maybeNull(types.string),
+  san: types.string,
+  fen: types.string,
+  playerId: types.string,
+  timestamp: types.string,
+  timeRemainingMs: types.maybeNull(types.number),
+});
+
+/**
+ * Multiplayer State Model
+ * Manages multiplayer session state, players, moves, and connection status
+ *
+ * This store tracks:
+ * - Current session/room information
+ * - Players in the session
+ * - Move history specific to multiplayer
+ * - Connection status (transient, not persisted)
+ * - Last activity timestamp
+ */
+const MultiplayerStateModel = types
+  .model('MultiplayerState', {
+    // Session identifiers
+    sessionId: types.maybeNull(types.string),
+    roomId: types.maybeNull(types.string),
+
+    // Session state
+    sessionState: types.optional(
+      types.enumeration('SessionState', [
+        'waiting',
+        'active',
+        'completed',
+        'abandoned',
+        'expired',
+      ]),
+      'waiting'
+    ),
+
+    // Player tracking
+    localPlayerId: types.maybeNull(types.string),
+    players: types.map(MultiplayerPlayerModel),
+
+    // Move history (separate from local game moves)
+    moves: types.array(MultiplayerMoveModel),
+
+    // Connection status (transient)
+    connectionStatus: types.optional(
+      types.enumeration('ConnectionStatus', [
+        'disconnected',
+        'connecting',
+        'connected',
+        'error',
+      ]),
+      'disconnected'
+    ),
+
+    // Activity tracking
+    lastActivityAt: types.optional(types.string, () => new Date().toISOString()),
+
+    // Draw offer tracking (transient - not persisted)
+    pendingDrawOffer: types.optional(types.boolean, false),
+    drawOfferedBy: types.maybeNull(types.string),
+
+    // Game result tracking
+    gameResult: types.maybeNull(
+      types.enumeration('GameResult', ['1-0', '0-1', '1/2-1/2', '*'])
+    ),
+    resultReason: types.maybeNull(types.string),
+    
+    // Game start readiness tracking (not persisted - will reset on hydration)
+    localPlayerReady: types.optional(types.boolean, false),
+    remotePlayerReady: types.optional(types.boolean, false),
+  })
+  .volatile(() => ({
+    // Move queue for synchronization (not persisted)
+    moveQueue: createMoveQueue() as MoveQueue,
+  }))
+  .views((self) => ({
+    get isConnected() {
+      return self.connectionStatus === 'connected';
+    },
+    get isInSession() {
+      return self.sessionId !== null && self.roomId !== null;
+    },
+    get localPlayer() {
+      return self.localPlayerId ? self.players.get(self.localPlayerId) : null;
+    },
+    get remotePlayers() {
+      const players: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.id !== self.localPlayerId) {
+          players.push(player);
+        }
+      });
+      return players;
+    },
+    get moveCount() {
+      return self.moves.length;
+    },
+    /**
+     * Get player by color
+     */
+    getPlayerByColor(color: 'white' | 'black') {
+      let foundPlayer: Instance<typeof MultiplayerPlayerModel> | null = null;
+      self.players.forEach((player) => {
+        if (player.color === color) {
+          foundPlayer = player;
+        }
+      });
+      return foundPlayer;
+    },
+    /**
+     * Check if there is a pending draw offer
+     */
+    get hasPendingDrawOffer() {
+      return self.pendingDrawOffer && self.drawOfferedBy !== null;
+    },
+    /**
+     * Check if the local player offered the draw
+     */
+    get isDrawOfferedByLocalPlayer() {
+      return self.pendingDrawOffer && self.drawOfferedBy === self.localPlayerId;
+    },
+    /**
+     * Check if the draw offer is from a remote player
+     */
+    get isDrawOfferedByRemotePlayer() {
+      return self.pendingDrawOffer && self.drawOfferedBy !== self.localPlayerId;
+    },
+    /**
+     * Get all seat-holders (players with assigned colors)
+     */
+    get seatHolders() {
+      const seats: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'seat' && player.color) {
+          seats.push(player);
+        }
+      });
+      return seats;
+    },
+    /**
+     * Get all spectators (players without seats)
+     */
+    get spectators() {
+      const specs: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'spectator') {
+          specs.push(player);
+        }
+      });
+      return specs;
+    },
+    /**
+     * Check if both seats are filled
+     */
+    get areBothSeatsFilled() {
+      const whitePlayer = this.getPlayerByColor('white');
+      const blackPlayer = this.getPlayerByColor('black');
+      return whitePlayer !== null && blackPlayer !== null;
+    },
+    /**
+     * Check if both players are ready to start the game
+     */
+    get areBothPlayersReady() {
+      return self.localPlayerReady && self.remotePlayerReady;
+    },
+  }))
+  .actions((self) => ({
+    /**
+     * Set connection status
+     */
+    setConnectionStatus(
+      status: 'disconnected' | 'connecting' | 'connected' | 'error'
+    ) {
+      self.connectionStatus = status;
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Join a room/session
+     */
+    joinRoom(
+      roomId: string,
+      sessionId: string,
+      localPlayerId: string,
+      displayName: string
+    ) {
+      self.roomId = roomId;
+      self.sessionId = sessionId;
+      self.localPlayerId = localPlayerId;
+      self.sessionState = 'waiting';
+      self.lastActivityAt = new Date().toISOString();
+
+      // Add local player if not already present
+      if (!self.players.has(localPlayerId)) {
+        self.players.put({
+          id: localPlayerId,
+          displayName,
+          color: null,
+          role: 'spectator', // Initially a spectator until assigned a color
+          isOnline: true,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+
+      console.log(`[MultiplayerStore] Joined room: ${roomId}, session: ${sessionId}`);
+    },
+
+    /**
+     * Leave the current room/session
+     */
+    leaveRoom() {
+      console.log(
+        `[MultiplayerStore] Leaving room: ${self.roomId}, session: ${self.sessionId}`
+      );
+      self.roomId = null;
+      self.sessionId = null;
+      self.sessionState = 'abandoned';
+      self.connectionStatus = 'disconnected';
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Update session state
+     */
+    setSessionState(state: SessionState) {
+      self.sessionState = state;
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Add or update a player
+     * Automatically determines role based on seat availability and color assignment
+     */
+    addOrUpdatePlayer(
+      playerId: string,
+      displayName: string,
+      color?: 'white' | 'black' | null,
+      isOnline?: boolean
+    ) {
+      const existingPlayer = self.players.get(playerId);
+      
+      // Determine role based on color and seat availability
+      // Players with colors are seat-holders, others are spectators
+      let role: 'seat' | 'spectator' = 'spectator';
+      
+      if (color && (color === 'white' || color === 'black')) {
+        // Player has a color - they're a seat-holder
+        role = 'seat';
+      } else if (existingPlayer && existingPlayer.role === 'seat') {
+        // Keep existing seat role if player already has one
+        role = 'seat';
+      }
+      
+      if (existingPlayer) {
+        existingPlayer.displayName = displayName;
+        if (color !== undefined) {
+          existingPlayer.color = color;
+          // Update role when color is assigned
+          if (color) {
+            existingPlayer.role = 'seat';
+          }
+        }
+        if (isOnline !== undefined) {
+          existingPlayer.isOnline = isOnline;
+        }
+        existingPlayer.lastSeenAt = new Date().toISOString();
+      } else {
+        // Client-side guard: prevent adding more than 2 seat-holders
+        if (role === 'seat' && color) {
+          // Check if another player already has this color seat (using Array.find for efficiency)
+          const playersArray = Array.from(self.players.values());
+          const existingColorPlayer = playersArray.find(
+            (player) => player.color === color && player.id !== playerId
+          );
+          
+          if (existingColorPlayer) {
+            console.warn(
+              `[MultiplayerStore] Attempted to add duplicate ${color} player. Converting to spectator.`
+            );
+            role = 'spectator';
+          }
+        }
+        
+        self.players.put({
+          id: playerId,
+          displayName,
+          color: color || null,
+          role,
+          isOnline: isOnline ?? true,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Remove a player
+     */
+    removePlayer(playerId: string) {
+      self.players.delete(playerId);
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Add a move to the history
+     */
+    addMove(
+      moveId: string,
+      from: string,
+      to: string,
+      san: string,
+      fen: string,
+      playerId: string,
+      promotion?: string,
+      timeRemainingMs?: number
+    ) {
+      self.moves.push({
+        id: moveId,
+        from,
+        to,
+        promotion: promotion || null,
+        san,
+        fen,
+        playerId,
+        timestamp: new Date().toISOString(),
+        timeRemainingMs: timeRemainingMs ?? null,
+      });
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Clear all moves
+     */
+    clearMoves() {
+      self.moves.clear();
+      self.lastActivityAt = new Date().toISOString();
+    },
+
+    /**
+     * Enqueue a remote move for processing
+     */
+    enqueueRemoteMove(
+      from: string,
+      to: string,
+      san: string,
+      fen: string,
+      senderId: string,
+      timestamp: string,
+      promotion?: string,
+      timeRemainingMs?: number
+    ) {
+      const payload = {
+        sessionId: self.sessionId || '',
+        from,
+        to,
+        san,
+        fen,
+        promotion,
+        timeRemainingMs,
+      };
+
+      self.moveQueue.enqueue(payload, senderId, timestamp);
+      self.lastActivityAt = new Date().toISOString();
+
+      console.log(
+        `[MultiplayerStore] Enqueued remote move: ${from}-${to} from ${senderId}`
+      );
+    },
+
+    /**
+     * Get the move queue for external processing
+     */
+    getMoveQueue(): MoveQueue {
+      return self.moveQueue;
+    },
+
+    /**
+     * Clear the move queue
+     */
+    clearMoveQueue() {
+      self.moveQueue.clear();
+      console.log('[MultiplayerStore] Move queue cleared');
+    },
+
+    /**
+     * Offer a draw to the opponent
+     */
+    offerDraw() {
+      if (self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] Draw offer already pending');
+        return false;
+      }
+      
+      self.pendingDrawOffer = true;
+      self.drawOfferedBy = self.localPlayerId;
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer initiated by local player');
+      return true;
+    },
+
+    /**
+     * Receive a draw offer from remote player
+     */
+    receiveDrawOffer(playerId: string) {
+      if (self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] Draw offer already pending');
+        return;
+      }
+      
+      self.pendingDrawOffer = true;
+      self.drawOfferedBy = playerId;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Draw offer received from ${playerId}`);
+    },
+
+    /**
+     * Accept a draw offer
+     */
+    acceptDraw() {
+      if (!self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] No pending draw offer to accept');
+        return false;
+      }
+      
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.gameResult = '1/2-1/2';
+      self.resultReason = 'Draw by agreement';
+      self.sessionState = 'completed';
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer accepted');
+      return true;
+    },
+
+    /**
+     * Decline a draw offer
+     */
+    declineDraw() {
+      if (!self.pendingDrawOffer) {
+        console.warn('[MultiplayerStore] No pending draw offer to decline');
+        return false;
+      }
+      
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] Draw offer declined');
+      return true;
+    },
+
+    /**
+     * Resign the game
+     */
+    resign() {
+      const localPlayer = self.localPlayer;
+      if (!localPlayer || !localPlayer.color) {
+        console.warn('[MultiplayerStore] Cannot resign - no local player color assigned');
+        return false;
+      }
+      
+      // Determine the result based on who resigned
+      self.gameResult = localPlayer.color === 'white' ? '0-1' : '1-0';
+      self.resultReason = `${localPlayer.color === 'white' ? 'White' : 'Black'} resigned`;
+      self.sessionState = 'completed';
+      
+      // Clear any pending draw offer
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Local player resigned: ${self.gameResult}`);
+      return true;
+    },
+
+    /**
+     * Process a remote player's resignation
+     */
+    processRemoteResign(playerId: string) {
+      const resigningPlayer = self.players.get(playerId);
+      if (!resigningPlayer || !resigningPlayer.color) {
+        console.warn('[MultiplayerStore] Cannot process resignation - player not found or no color');
+        return;
+      }
+      
+      // Determine the result based on who resigned
+      self.gameResult = resigningPlayer.color === 'white' ? '0-1' : '1-0';
+      self.resultReason = `${resigningPlayer.color === 'white' ? 'White' : 'Black'} resigned`;
+      self.sessionState = 'completed';
+      
+      // Clear any pending draw offer
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Remote player resigned: ${self.gameResult}`);
+    },
+
+    /**
+     * Set local player as ready to start the game
+     */
+    setLocalPlayerReady(ready: boolean = true) {
+      self.localPlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Local player ready: ${ready}`);
+    },
+    
+    /**
+     * Set remote player as ready (received from broadcast)
+     */
+    setRemotePlayerReady(ready: boolean = true) {
+      self.remotePlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Remote player ready: ${ready}`);
+    },
+
+    /**
+     * Reset the multiplayer state to initial values
+     */
+    reset() {
+      self.sessionId = null;
+      self.roomId = null;
+      self.sessionState = 'waiting';
+      self.localPlayerId = null;
+      self.players.clear();
+      self.moves.clear();
+      self.moveQueue.clear();
+      self.connectionStatus = 'disconnected';
+      self.pendingDrawOffer = false;
+      self.drawOfferedBy = null;
+      self.gameResult = null;
+      self.resultReason = null;
+      self.localPlayerReady = false;
+      self.remotePlayerReady = false;
+      self.lastActivityAt = new Date().toISOString();
+      console.log('[MultiplayerStore] State reset');
+    },
+  }));
+
+/**
  * Root Store Model
  * Combines all store slices
  */
@@ -491,6 +1061,7 @@ const RootStoreModel = types
     ui: UIStateModel,
     settings: SettingsModel,
     engine: EngineStateModel,
+    multiplayer: MultiplayerStateModel,
   })
   .actions((self) => ({
     hydrateStore() {
@@ -517,6 +1088,7 @@ export const createDefaultSnapshot = () => ({
     isEnginePanelVisible: false,
     isEvalBarVisible: false,
     isBoardFlipped: false,
+    userOverrodeFlip: false,
     engineDisplayMode: 'both' as const,
   },
   settings: {
@@ -531,10 +1103,26 @@ export const createDefaultSnapshot = () => ({
     currentDepth: 0,
     currentFen: '',
   },
+  multiplayer: {
+    sessionId: null,
+    roomId: null,
+    sessionState: 'waiting' as const,
+    localPlayerId: null,
+    players: {},
+    moves: [],
+    connectionStatus: 'disconnected' as const,
+    lastActivityAt: new Date().toISOString(),
+    pendingDrawOffer: false,
+    drawOfferedBy: null,
+    gameResult: null,
+    resultReason: null,
+  },
 });
 
 export type RootStore = Instance<typeof RootStoreModel>;
 export type RootStoreSnapshot = SnapshotIn<typeof RootStoreModel>;
 export type EngineAnalysis = Instance<typeof EngineAnalysisModel>;
+export type MultiplayerPlayer = Instance<typeof MultiplayerPlayerModel>;
+export type MultiplayerMove = Instance<typeof MultiplayerMoveModel>;
 
 export default RootStoreModel;

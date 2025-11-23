@@ -4,12 +4,15 @@ import { observer } from 'mobx-react-lite';
 import NotificationContainer from '@/components/NotificationContainer';
 import { MainLayout, GameLayout, ControlPanel } from '@/components/layout';
 import { PlayerControls, BoardSection } from '@/components/features';
+import RoomManager from '@/components/RoomManager';
+import DrawResignControls from '@/components/DrawResignControls';
 import { useRootStore } from '@/stores/store-setup';
 import { useEngine } from '@/hooks/useEngine';
 import { useAutoEvaluation } from '@/hooks/useAutoEvaluation';
 import { useEasterEgg } from '@/hooks/useEasterEgg';
 import { useNotification } from '@/hooks/useNotification';
 import { useMoveReview } from '@/hooks/useMoveReview';
+import { useMultiplayer } from '@/hooks/useMultiplayer';
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 const Home = observer(() => {
@@ -60,6 +63,57 @@ const Home = observer(() => {
   const { setTargetElement } = useEasterEgg({
     onReveal: () => store.ui.showEnginePanel(),
   });
+
+  // Initialize multiplayer connection with draw/resign handlers
+  const {
+    broadcastDrawOffer,
+    broadcastDrawResponse,
+    broadcastResign,
+  } = useMultiplayer({
+    roomId: store.multiplayer.roomId || '',
+    playerId: store.multiplayer.localPlayerId || '',
+    autoConnect: false,
+    onDrawOffer: (payload, message) => {
+      // Receive draw offer from opponent
+      if (message.senderId !== store.multiplayer.localPlayerId) {
+        store.multiplayer.receiveDrawOffer(message.senderId);
+        showMessage('info', '🤝 Your opponent offers a draw');
+      }
+    },
+    onDrawResponse: (payload, message) => {
+      // Receive draw response from opponent
+      if (message.senderId !== store.multiplayer.localPlayerId) {
+        if (payload.accepted) {
+          store.multiplayer.acceptDraw();
+          showMessage('success', 'Draw accepted! Game ended in a draw 🤝');
+        } else {
+          store.multiplayer.declineDraw();
+          showMessage('info', 'Your draw offer was declined');
+        }
+      }
+    },
+    onResign: (payload, message) => {
+      // Receive resignation from opponent
+      if (message.senderId !== store.multiplayer.localPlayerId) {
+        store.multiplayer.processRemoteResign(message.senderId);
+        const winner = store.multiplayer.localPlayer?.color === 'white' ? 'White' : 'Black';
+        showMessage('success', `Your opponent resigned. ${winner} wins! 👑`);
+      }
+    },
+  });
+
+  // Handle room query parameter for shareable URLs
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room');
+    
+    if (roomParam && !store.multiplayer.isInSession) {
+      // Auto-join room from URL parameter
+      showMessage('info', `Joining room ${roomParam}...`);
+    }
+  }, [store.multiplayer.isInSession, showMessage]);
 
   // Get engine highlights and best eval from store (shared global state)
   const engineHighlights = engine.engineHighlights;
@@ -169,17 +223,41 @@ const Home = observer(() => {
           />
         }
         rightPanel={
-          <ControlPanel title="Black Controls">
-            <PlayerControls
-              player="b"
-              showMoveHistory={true}
-              onShowMessage={showMessage}
-              pgnInput={pgnInput}
-              setPgnInput={setPgnInput}
-              fenInput={fenInput}
-              setFenInput={setFenInput}
-            />
-          </ControlPanel>
+          <>
+            <ControlPanel title="Black Controls">
+              <PlayerControls
+                player="b"
+                showMoveHistory={true}
+                onShowMessage={showMessage}
+                pgnInput={pgnInput}
+                setPgnInput={setPgnInput}
+                fenInput={fenInput}
+                setFenInput={setFenInput}
+              />
+            </ControlPanel>
+            
+            {/* Multiplayer Room Manager */}
+            <div className="mt-4">
+              <RoomManager
+                onRoomJoined={(roomId, sessionId) => {
+                  showMessage('success', `Joined room: ${roomId}`);
+                }}
+                onShowMessage={showMessage}
+              />
+            </div>
+
+            {/* Draw and Resign Controls */}
+            {store.multiplayer.isInSession && (
+              <div className="mt-4">
+                <DrawResignControls
+                  onOfferDraw={broadcastDrawOffer}
+                  onDrawResponse={broadcastDrawResponse}
+                  onResign={broadcastResign}
+                  onShowMessage={showMessage}
+                />
+              </div>
+            )}
+          </>
         }
       />
 
