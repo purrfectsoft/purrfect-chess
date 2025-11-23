@@ -301,6 +301,7 @@ const UIStateModel = types
     isEnginePanelVisible: types.optional(types.boolean, false),
     isEvalBarVisible: types.optional(types.boolean, false),
     isBoardFlipped: types.optional(types.boolean, false),
+    userOverrodeFlip: types.optional(types.boolean, false),
     engineDisplayMode: types.optional(
       types.enumeration('EngineDisplayMode', [
         'squares',
@@ -331,6 +332,13 @@ const UIStateModel = types
     },
     toggleBoardFlip() {
       self.isBoardFlipped = !self.isBoardFlipped;
+      self.userOverrodeFlip = true; // User manually toggled the flip
+    },
+    setBoardFlipped(flipped: boolean, isAutomatic: boolean = false) {
+      self.isBoardFlipped = flipped;
+      if (!isAutomatic) {
+        self.userOverrodeFlip = true;
+      }
     },
     setEngineDisplayMode(mode: 'squares' | 'arrows' | 'both' | 'none') {
       self.engineDisplayMode = mode;
@@ -491,6 +499,7 @@ const MultiplayerPlayerModel = types.model('MultiplayerPlayer', {
   id: types.identifier,
   displayName: types.string,
   color: types.maybeNull(types.enumeration('PlayerColor', ['white', 'black'])),
+  role: types.optional(types.enumeration('PlayerRole', ['seat', 'spectator']), 'spectator'),
   isOnline: types.optional(types.boolean, true),
   lastSeenAt: types.optional(types.string, () => new Date().toISOString()),
 });
@@ -627,6 +636,38 @@ const MultiplayerStateModel = types
     get isDrawOfferedByRemotePlayer() {
       return self.pendingDrawOffer && self.drawOfferedBy !== self.localPlayerId;
     },
+    /**
+     * Get all seat-holders (players with assigned colors)
+     */
+    get seatHolders() {
+      const seats: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'seat' && player.color) {
+          seats.push(player);
+        }
+      });
+      return seats;
+    },
+    /**
+     * Get all spectators (players without seats)
+     */
+    get spectators() {
+      const specs: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'spectator') {
+          specs.push(player);
+        }
+      });
+      return specs;
+    },
+    /**
+     * Check if both seats are filled
+     */
+    get areBothSeatsFilled() {
+      const whitePlayer = this.getPlayerByColor('white');
+      const blackPlayer = this.getPlayerByColor('black');
+      return whitePlayer !== null && blackPlayer !== null;
+    },
   }))
   .actions((self) => ({
     /**
@@ -660,6 +701,7 @@ const MultiplayerStateModel = types
           id: localPlayerId,
           displayName,
           color: null,
+          role: 'spectator', // Initially a spectator until assigned a color
           isOnline: true,
           lastSeenAt: new Date().toISOString(),
         });
@@ -692,6 +734,7 @@ const MultiplayerStateModel = types
 
     /**
      * Add or update a player
+     * Automatically determines role based on seat availability and color assignment
      */
     addOrUpdatePlayer(
       playerId: string,
@@ -700,20 +743,56 @@ const MultiplayerStateModel = types
       isOnline?: boolean
     ) {
       const existingPlayer = self.players.get(playerId);
+      
+      // Determine role based on color and seat availability
+      // Players with colors are seat-holders, others are spectators
+      let role: 'seat' | 'spectator' = 'spectator';
+      
+      if (color && (color === 'white' || color === 'black')) {
+        // Player has a color - they're a seat-holder
+        role = 'seat';
+      } else if (existingPlayer && existingPlayer.role === 'seat') {
+        // Keep existing seat role if player already has one
+        role = 'seat';
+      }
+      
       if (existingPlayer) {
         existingPlayer.displayName = displayName;
         if (color !== undefined) {
           existingPlayer.color = color;
+          // Update role when color changes
+          if (color) {
+            existingPlayer.role = 'seat';
+          }
         }
         if (isOnline !== undefined) {
           existingPlayer.isOnline = isOnline;
         }
         existingPlayer.lastSeenAt = new Date().toISOString();
       } else {
+        // Client-side guard: prevent adding more than 2 seat-holders
+        if (role === 'seat' && color) {
+          // Find existing player with this color
+          let existingColorPlayer = null;
+          self.players.forEach((player) => {
+            if (player.color === color && player.id !== playerId) {
+              existingColorPlayer = player;
+            }
+          });
+          
+          if (existingColorPlayer) {
+            console.warn(
+              `[MultiplayerStore] Attempted to add duplicate ${color} player. Converting to spectator.`
+            );
+            role = 'spectator';
+          }
+        }
+        
         self.players.put({
           id: playerId,
           displayName,
           color: color || null,
+          role,
           isOnline: isOnline ?? true,
           lastSeenAt: new Date().toISOString(),
         });
@@ -981,6 +1060,7 @@ export const createDefaultSnapshot = () => ({
     isEnginePanelVisible: false,
     isEvalBarVisible: false,
     isBoardFlipped: false,
+    userOverrodeFlip: false,
     engineDisplayMode: 'both' as const,
   },
   settings: {

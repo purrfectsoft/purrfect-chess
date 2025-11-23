@@ -71,17 +71,32 @@ describe('useRoom hook', () => {
         return Promise.resolve({ data: null, error: null }) as any;
       });
 
-      // Mock session insert
-      vi.mocked(supabase.from).mockReturnValue({
-        insert: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({
-              data: { id: mockSessionId, room_id: mockRoomCode },
-              error: null,
+      // Mock session insert and player update
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            insert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { id: mockSessionId, room_id: mockRoomCode },
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
-      } as any);
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 
@@ -124,23 +139,38 @@ describe('useRoom hook', () => {
         error: null,
       } as any);
 
-      // Mock session query
-      vi.mocked(supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({
-              data: {
-                id: mockSessionId,
-                room_id: mockRoomCode,
-                state: 'waiting',
-                white_player_id: null,
-                black_player_id: null,
-              },
-              error: null,
+      // Mock session query and player update
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: {
+                    id: mockSessionId,
+                    room_id: mockRoomCode,
+                    state: 'waiting',
+                    white_player_id: null,
+                    black_player_id: null,
+                  },
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
-      } as any);
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 
@@ -159,16 +189,31 @@ describe('useRoom hook', () => {
         error: null,
       } as any);
 
-      vi.mocked(supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({
-              data: null,
-              error: new Error('Not found'),
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: null,
+                  error: new Error('Not found'),
+                }),
+              }),
             }),
-          }),
-        }),
-      } as any);
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 
@@ -183,22 +228,37 @@ describe('useRoom hook', () => {
         error: null,
       } as any);
 
-      vi.mocked(supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({
-              data: {
-                id: 'session-456',
-                room_id: 'ABCD-1234',
-                state: 'waiting',
-                white_player_id: 'player-1',
-                black_player_id: 'player-2',
-              },
-              error: null,
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: {
+                    id: 'session-456',
+                    room_id: 'ABCD-1234',
+                    state: 'waiting',
+                    white_player_id: 'player-1',
+                    black_player_id: 'player-2',
+                  },
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
-      } as any);
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 
@@ -217,27 +277,42 @@ describe('useRoom hook', () => {
       } as any);
 
       let capturedRoomId = '';
-      vi.mocked(supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockImplementation((field: string, value: string) => {
-            if (field === 'room_id') {
-              capturedRoomId = value;
-            }
-            return {
-              single: vi.fn().mockResolvedValue({
-                data: {
-                  id: mockSessionId,
-                  room_id: value,
-                  state: 'waiting',
-                  white_player_id: null,
-                  black_player_id: null,
-                },
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockImplementation((field: string, value: string) => {
+                if (field === 'room_id') {
+                  capturedRoomId = value;
+                }
+                return {
+                  single: vi.fn().mockResolvedValue({
+                    data: {
+                      id: mockSessionId,
+                      room_id: value,
+                      state: 'waiting',
+                      white_player_id: null,
+                      black_player_id: null,
+                    },
+                    error: null,
+                  }),
+                };
+              }),
+            }),
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
                 error: null,
               }),
-            };
-          }),
-        }),
-      } as any);
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 
@@ -267,16 +342,31 @@ describe('useRoom hook', () => {
         error: null,
       } as any);
 
-      vi.mocked(supabase.from).mockReturnValue({
-        insert: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({
-              data: { id: 'session-1', room_id: 'TEST-1234' },
-              error: null,
+      vi.mocked(supabase.from).mockImplementation((table: string) => {
+        if (table === 'sessions') {
+          return {
+            insert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { id: 'session-1', room_id: 'TEST-1234' },
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
-      } as any);
+          } as any;
+        }
+        if (table === 'players') {
+          return {
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: null,
+                error: null,
+              }),
+            }),
+          } as any;
+        }
+        return {} as any;
+      });
 
       const { result } = renderHook(() => useRoom(), { wrapper });
 

@@ -56,7 +56,7 @@ const RoomManager = observer(function RoomManager({
   });
 
   // Initialize multiplayer connection when in a room
-  const { connectionStatus, connect, disconnect, broadcastPlayerJoin } = useMultiplayer({
+  const { connectionStatus, connect, disconnect, updatePresence, broadcastPlayerJoin } = useMultiplayer({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
@@ -256,6 +256,16 @@ const RoomManager = observer(function RoomManager({
           true
         );
 
+        // Auto-flip board for black players (Issue 3)
+        // Only flip if user hasn't manually overridden the flip setting
+        if (assignedColor === 'black' && !store.ui.userOverrodeFlip) {
+          console.log('[RoomManager] Auto-flipping board for black player');
+          store.ui.setBoardFlipped(true, true); // true = automatic flip
+        } else if (assignedColor === 'white' && !store.ui.userOverrodeFlip) {
+          console.log('[RoomManager] Setting normal orientation for white player');
+          store.ui.setBoardFlipped(false, true); // false = white on bottom
+        }
+
         // Update session state in store if we just activated it
         if (updates.state === 'active') {
           multiplayer.setSessionState('active');
@@ -277,7 +287,7 @@ const RoomManager = observer(function RoomManager({
     } catch (error) {
       console.error('[RoomManager] Error in assignPlayerToSession:', error);
     }
-  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin, syncExistingPlayers]);
+  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin, syncExistingPlayers, store.ui]);
 
   // Subscribe to session changes to detect when second player joins
   useEffect(() => {
@@ -324,6 +334,10 @@ const RoomManager = observer(function RoomManager({
               'white',
               true
             );
+            // Auto-flip board for white (not flipped)
+            if (!store.ui.userOverrodeFlip) {
+              store.ui.setBoardFlipped(false, true);
+            }
           } else if (newSession.black_player_id === multiplayer.localPlayerId) {
             multiplayer.addOrUpdatePlayer(
               multiplayer.localPlayerId,
@@ -331,6 +345,10 @@ const RoomManager = observer(function RoomManager({
               'black',
               true
             );
+            // Auto-flip board for black
+            if (!store.ui.userOverrodeFlip) {
+              store.ui.setBoardFlipped(true, true);
+            }
           }
 
           // Fetch and add the other player's information when session has both players
@@ -376,7 +394,30 @@ const RoomManager = observer(function RoomManager({
       console.log(`[RoomManager] Cleaning up session subscription`);
       supabase.removeChannel(sessionChannel);
     };
-  }, [sessionId, multiplayer, displayName, onShowMessage]);
+  }, [sessionId, multiplayer, displayName, onShowMessage, store.ui]);
+
+  // Update presence when display name changes (Issue 2 fix)
+  useEffect(() => {
+    // Only update if we're connected and have a player ID
+    if (
+      multiplayer.connectionStatus === 'connected' &&
+      multiplayer.localPlayerId &&
+      roomId &&
+      displayName
+    ) {
+      const presenceState = {
+        playerId: multiplayer.localPlayerId,
+        displayName: displayName || 'Anonymous Cat',
+        online_at: new Date().toISOString(),
+        color: multiplayer.localPlayer?.color as 'white' | 'black' | undefined,
+      };
+      
+      console.log('[RoomManager] Updating presence with new display name:', displayName);
+      updatePresence(presenceState).catch((error) => {
+        console.error('[RoomManager] Failed to update presence:', error);
+      });
+    }
+  }, [displayName, multiplayer.connectionStatus, multiplayer.localPlayerId, multiplayer.localPlayer, roomId, updatePresence]);
 
   // Connect to room when joining
   useEffect(() => {
@@ -520,8 +561,9 @@ const RoomManager = observer(function RoomManager({
     }
   }, [roomId, onShowMessage]);
 
-  // Get list of players in the room
-  const playersInRoom = Array.from(multiplayer.players.values());
+  // Get seat-holders and spectators separately
+  const seatHolders = multiplayer.seatHolders;
+  const spectators = multiplayer.spectators;
 
   return (
     <div className="flex flex-col gap-4 p-4 rounded-lg" style={{ background: '#2a2a2a' }}>
@@ -664,14 +706,14 @@ const RoomManager = observer(function RoomManager({
             </div>
           </div>
 
-          {/* Players in room */}
-          {playersInRoom.length > 0 && (
+          {/* Players in room - show seat-holders separately from spectators */}
+          {(seatHolders.length > 0 || spectators.length > 0) && (
             <div className="flex flex-col gap-2 p-3 rounded" style={{ background: '#333' }}>
               <span className="text-sm font-semibold text-gray-300">
-                Players ({playersInRoom.length}/2):
+                Players ({seatHolders.length}/2):
               </span>
               <ul className="list-none flex flex-col gap-1">
-                {playersInRoom.map((player) => (
+                {seatHolders.map((player) => (
                   <li
                     key={player.id}
                     className="flex items-center gap-2 text-sm"
@@ -690,6 +732,30 @@ const RoomManager = observer(function RoomManager({
                   </li>
                 ))}
               </ul>
+              
+              {/* Show spectators separately if any exist */}
+              {spectators.length > 0 && (
+                <>
+                  <span className="text-sm font-semibold text-gray-300 mt-2">
+                    Spectators ({spectators.length}):
+                  </span>
+                  <ul className="list-none flex flex-col gap-1">
+                    {spectators.map((player) => (
+                      <li
+                        key={player.id}
+                        className="flex items-center gap-2 text-sm"
+                        style={{ color: player.isOnline ? '#888' : '#666' }}
+                      >
+                        <span>{player.isOnline ? '👁️' : '⚫'}</span>
+                        <span>{player.displayName}</span>
+                        {player.id === multiplayer.localPlayerId && (
+                          <span className="text-xs text-blue-400">(you)</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           )}
 

@@ -27,6 +27,7 @@ export const [RootStoreProvider, useRootStore] = createPersistentStore(
       isEnginePanelVisible: false,
       isEvalBarVisible: false,
       isBoardFlipped: false,
+      userOverrodeFlip: false,
       engineDisplayMode: 'both' as const,
     },
     engine: {
