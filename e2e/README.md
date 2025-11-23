@@ -65,6 +65,75 @@ Tests UI layout consistency (existing test):
 
 **Coverage:** 5 tests
 
+### 5. `room-manager.spec.ts` - Room Manager UI Tests
+
+Tests room creation and joining UI:
+
+- Room creation UI display
+- Join room form
+- Room code formatting
+- Display name input
+
+**Coverage:** 4 tests
+
+### 6. `multiplayer.spec.ts` - Multiplayer Flow Tests (NEW)
+
+Comprehensive tests for multiplayer functionality using Supabase Realtime:
+
+- **Room Creation and Joining:**
+  - Creating rooms with valid room codes
+  - Joining existing rooms
+  - Invalid room code rejection
+  - Shareable room code format
+  
+- **Move Synchronization:**
+  - Real-time move syncing between players
+  - Multiple move sequences
+  - Illegal move rejection
+  
+- **Reconnection and State Recovery:**
+  - Game state recovery after disconnect
+  - No duplicate moves after reconnection
+  - Multiple reconnection cycles
+  
+- **Game Actions:**
+  - Resignation handling
+  - Draw offers and acceptance
+  - Draw offer rejection
+  
+- **Game End Conditions:**
+  - Checkmate detection and sync
+  - Timeout handling
+  
+- **Edge Cases:**
+  - Player leaving mid-game
+  - Turn enforcement
+  - Rapid reconnection attempts
+
+**Coverage:** 17 tests  
+**Requirements:** Supabase credentials configured
+
+### 7. `move-sync.spec.ts` - Move Sync Tests (Skipped)
+
+Tests for move synchronization (currently skipped, requires Supabase):
+
+- Two-player move synchronization
+- Illegal move rejection
+- Simultaneous move conflict resolution
+- Move order across reconnection
+
+**Coverage:** 5 tests (skipped by default)
+
+### 8. `reconnection.spec.ts` - Reconnection Tests (Skipped)
+
+Tests for reconnection scenarios (currently skipped, requires Supabase):
+
+- Game state recovery after disconnect
+- No duplicate moves after reconnection
+- Multiple disconnection cycles
+
+**Coverage:** 3 tests (skipped by default)
+
 ## Running Tests
 
 ### Prerequisites
@@ -99,6 +168,95 @@ yarn test:e2e --grep "checkmate"
 PWDEBUG=1 yarn test:e2e
 ```
 
+### Multiplayer Tests
+
+Multiplayer tests require Supabase credentials to be configured. These tests use the `multiplayer.spec.ts` file and the helper utilities in `e2e/helpers/multiplayer.ts`.
+
+#### Setting Up for Multiplayer Tests
+
+1. **Create a test Supabase project** (or use development project):
+   ```bash
+   # Visit https://supabase.com and create a project
+   # Get your project URL and anon key
+   ```
+
+2. **Configure environment variables**:
+   ```bash
+   # Copy example env file
+   cp .env.example .env.local
+   
+   # Edit .env.local and add your Supabase credentials
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   ```
+
+3. **Set up database schema**:
+   ```bash
+   # Follow instructions in supabase/ directory to create tables
+   # Or use Supabase CLI: supabase db push
+   ```
+
+#### Running Multiplayer Tests
+
+```bash
+# Run all multiplayer tests
+yarn test:e2e e2e/multiplayer.spec.ts
+
+# Run multiplayer tests in UI mode
+yarn test:e2e:ui e2e/multiplayer.spec.ts
+
+# Run specific multiplayer test
+yarn test:e2e e2e/multiplayer.spec.ts -g "should synchronize moves"
+
+# Run with explicit Supabase credentials (override .env.local)
+NEXT_PUBLIC_SUPABASE_URL=https://test.supabase.co \
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-key \
+yarn test:e2e e2e/multiplayer.spec.ts
+```
+
+#### Multiplayer Test Helper Functions
+
+The `e2e/helpers/multiplayer.ts` module provides utilities for multiplayer testing:
+
+```typescript
+import {
+  createPlayer,        // Create a browser context for a player
+  createRoom,         // Create a multiplayer room
+  joinRoom,           // Join an existing room
+  makeMove,           // Make a chess move
+  waitForMoveSync,    // Wait for move synchronization
+  verifyBoardSync,    // Verify board state matches
+  disconnectPlayer,   // Simulate disconnection
+  reconnectPlayer,    // Reconnect to room
+  resign,             // Resign the game
+  offerDraw,          // Offer a draw
+  acceptDraw,         // Accept draw offer
+  cleanupPlayers,     // Clean up test contexts
+} from './helpers/multiplayer';
+```
+
+Example usage:
+```typescript
+test('my multiplayer test', async ({ browser }) => {
+  const player1 = await createPlayer(browser, 'Alice');
+  const player2 = await createPlayer(browser, 'Bob');
+  
+  try {
+    const room = await createRoom(player1);
+    await joinRoom(player2, room.roomId);
+    await waitForPlayersReady(player1, player2);
+    
+    await makeMove(player1, { from: 'e2', to: 'e4' });
+    await waitForMoveSync([player1, player2], { from: 'e2', to: 'e4' });
+    
+    await verifyBoardSync([player1, player2]);
+  } finally {
+    await cleanupPlayers(player1, player2);
+  }
+});
+```
+
+
 ### CI Execution
 
 Tests run automatically on:
@@ -107,7 +265,46 @@ Tests run automatically on:
 - Pull requests to `main` or `develop`
 - Manual workflow dispatch
 
-See `.github/workflows/test.yml` for the CI configuration.
+The CI pipeline includes three E2E test jobs:
+
+1. **`e2e`** - Standard E2E tests (gameplay, game conditions, full games, layout)
+   - Runs on every push/PR
+   - No external dependencies required
+   
+2. **`e2e-multiplayer`** - Multiplayer E2E tests
+   - Only runs when Supabase test credentials are configured
+   - Requires GitHub secrets: `SUPABASE_TEST_URL` and `SUPABASE_TEST_ANON_KEY`
+   - Tests room creation, joining, move sync, reconnection
+   
+#### Configuring CI for Multiplayer Tests
+
+To enable multiplayer tests in CI:
+
+1. **Set up a test Supabase project**:
+   - Create a dedicated Supabase project for CI testing
+   - Deploy the database schema from `supabase/` directory
+
+2. **Add GitHub secrets**:
+   ```
+   Settings → Secrets and variables → Actions → New repository secret
+   
+   SUPABASE_TEST_ANON_KEY: your-test-project-anon-key
+   ```
+
+3. **Add GitHub variable**:
+   ```
+   Settings → Secrets and variables → Actions → Variables → New repository variable
+   
+   SUPABASE_TEST_URL: https://your-test-project.supabase.co
+   ```
+
+4. **Multiplayer tests will now run automatically** when:
+   - PRs touch multiplayer code
+   - Pushing to main/develop branches
+   - Manual workflow dispatch
+
+See `.github/workflows/test.yml` for the complete CI configuration.
+
 
 ## Test Configuration
 
@@ -391,6 +588,8 @@ For issues or questions:
 
 ---
 
-**Last Updated:** 2025-11-08  
-**Test Count:** 39 tests across 4 files  
-**Coverage:** Gameplay, game conditions, full games, layout stability
+**Last Updated:** 2025-11-20  
+**Test Count:** 73 tests across 8 files  
+**Coverage:** Gameplay, game conditions, full games, layout stability, room manager UI, multiplayer flows (room creation, move sync, reconnection, game actions)  
+**Multiplayer Tests:** 29 tests (17 in multiplayer.spec.ts, 5 in move-sync.spec.ts, 3 in reconnection.spec.ts, 4 in room-manager.spec.ts)
+
