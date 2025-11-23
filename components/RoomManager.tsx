@@ -60,9 +60,9 @@ const RoomManager = observer(function RoomManager({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
-    presenceState: multiplayer.localPlayerId && displayName ? {
+    presenceState: multiplayer.localPlayerId ? {
       playerId: multiplayer.localPlayerId,
-      displayName,
+      displayName: displayName || 'Anonymous Cat',
       online_at: new Date().toISOString(),
       color: multiplayer.localPlayer?.color as 'white' | 'black' | undefined,
     } : undefined,
@@ -368,7 +368,9 @@ const RoomManager = observer(function RoomManager({
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[RoomManager] Session subscription status for ${sessionId}:`, status);
+      });
 
     return () => {
       console.log(`[RoomManager] Cleaning up session subscription`);
@@ -384,6 +386,11 @@ const RoomManager = observer(function RoomManager({
         roomId,
         attempted: false,
       };
+    }
+
+    // Sync players when connected
+    if (multiplayer.connectionStatus === 'connected' && sessionId) {
+      syncExistingPlayers();
     }
 
     // Only attempt connection if:
@@ -425,7 +432,7 @@ const RoomManager = observer(function RoomManager({
     };
     // Note: We only depend on connectionStatus (not isConnected) to prevent re-connection loops
     // The effect should only run when room changes, connection status changes, or component mounts
-  }, [isInRoom, roomId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, assignPlayerToSession]);
+  }, [isInRoom, roomId, sessionId, multiplayer.localPlayerId, displayName, multiplayer.connectionStatus, connect, disconnect, assignPlayerToSession, syncExistingPlayers]);
 
   // Handle room errors
   useEffect(() => {
