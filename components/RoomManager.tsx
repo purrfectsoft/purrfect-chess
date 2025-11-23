@@ -204,12 +204,18 @@ const RoomManager = observer(function RoomManager({
       // Load FEN from session
       if (session.initial_fen) {
         console.log('[RoomManager] Loading initial FEN:', session.initial_fen);
-        store.game.loadFen(session.initial_fen);
+        // Validate and load FEN - loadFen has built-in validation
+        const success = store.game.loadFen(session.initial_fen);
+        if (!success) {
+          console.error('[RoomManager] Failed to load FEN, using default position');
+          onShowMessage?.('error', 'Failed to load game position');
+        }
       }
 
-      // Set time controls
+      // Set time controls (convert seconds to minutes)
       if (session.time_control_initial !== null) {
-        const minutes = session.time_control_initial / 60; // Convert seconds to minutes
+        const SECONDS_PER_MINUTE = 60;
+        const minutes = session.time_control_initial / SECONDS_PER_MINUTE;
         const increment = session.time_control_increment;
         console.log('[RoomManager] Setting time controls:', minutes, 'minutes +', increment, 'seconds');
         store.game.setTimeControl(minutes, increment);

@@ -79,8 +79,6 @@ export function useRoom() {
       if (updateError) {
         console.warn('[useRoom] Failed to update display name:', updateError);
         // Don't throw - this is not critical
-      } else {
-        console.log(`[useRoom] Updated display name for player ${playerId}: ${displayName}`);
       }
 
       return playerId;

@@ -770,7 +770,7 @@ const MultiplayerStateModel = types
         existingPlayer.displayName = displayName;
         if (color !== undefined) {
           existingPlayer.color = color;
-          // Update role when color changes
+          // Update role when color is assigned
           if (color) {
             existingPlayer.role = 'seat';
           }
@@ -782,7 +782,7 @@ const MultiplayerStateModel = types
       } else {
         // Client-side guard: prevent adding more than 2 seat-holders
         if (role === 'seat' && color) {
-          // Find existing player with this color
+          // Check if another player already has this color seat
           let existingColorPlayer = null;
           self.players.forEach((player) => {
             if (player.color === color && player.id !== playerId) {
