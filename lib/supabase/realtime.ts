@@ -9,6 +9,7 @@ export enum RealtimeEventType {
   SESSION_STATE_CHANGE = 'session_state_change',
   PLAYER_JOIN = 'player_join',
   PLAYER_LEAVE = 'player_leave',
+  PLAYER_READY = 'player_ready',
   DRAW_OFFER = 'draw_offer',
   DRAW_RESPONSE = 'draw_response',
   RESIGN = 'resign',
@@ -80,6 +81,11 @@ export interface ResignPayload {
   sessionId: string;
 }
 
+export interface PlayerReadyPayload {
+  sessionId: string;
+  playerId: string;
+}
+
 /**
  * Channel subscription callback type
  */
@@ -138,6 +144,7 @@ export class RealtimeChannelManager {
       onSessionStateChange?: MessageCallback<SessionStatePayload>;
       onPlayerJoin?: MessageCallback<PlayerJoinPayload>;
       onPlayerLeave?: MessageCallback<PlayerLeavePayload>;
+      onPlayerReady?: MessageCallback<PlayerReadyPayload>;
       onDrawOffer?: MessageCallback<DrawOfferPayload>;
       onDrawResponse?: MessageCallback<DrawResponsePayload>;
       onResign?: MessageCallback<ResignPayload>;
@@ -206,6 +213,11 @@ export class RealtimeChannelManager {
         case RealtimeEventType.PLAYER_LEAVE:
           callbacks.onPlayerLeave?.(
             message as RealtimeMessage<PlayerLeavePayload>
+          );
+          break;
+        case RealtimeEventType.PLAYER_READY:
+          callbacks.onPlayerReady?.(
+            message as RealtimeMessage<PlayerReadyPayload>
           );
           break;
         case RealtimeEventType.DRAW_OFFER:

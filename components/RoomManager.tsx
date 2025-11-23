@@ -56,7 +56,7 @@ const RoomManager = observer(function RoomManager({
   });
 
   // Initialize multiplayer connection when in a room
-  const { connectionStatus, connect, disconnect, updatePresence, broadcastPlayerJoin } = useMultiplayer({
+  const { connectionStatus, connect, disconnect, updatePresence, broadcastPlayerJoin, broadcastPlayerReady } = useMultiplayer({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
@@ -83,6 +83,11 @@ const RoomManager = observer(function RoomManager({
         onShowMessage?.('info', `${player.displayName} left the room`);
       }
       multiplayer.removePlayer(payload.playerId);
+    },
+    onPlayerReady: (payload) => {
+      // Remote player is ready
+      console.log('[RoomManager] Remote player ready:', payload.playerId);
+      multiplayer.setRemotePlayerReady(true);
     },
     onPresenceJoin: (playerId, state) => {
       // Update player online status via presence
@@ -173,6 +178,54 @@ const RoomManager = observer(function RoomManager({
       console.error('[RoomManager] Error in syncExistingPlayers:', error);
     }
   }, [sessionId, multiplayer, fetchAndAddPlayer]);
+
+  // Initialize game when session becomes active (Issue 4)
+  const initializeGameFromSession = useCallback(async () => {
+    if (!sessionId) {
+      console.warn('[RoomManager] Cannot initialize game - missing session ID');
+      return;
+    }
+
+    try {
+      console.log('[RoomManager] Initializing game from session');
+      
+      // Fetch session data
+      const { data: session, error: fetchError } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (fetchError || !session) {
+        console.error('[RoomManager] Failed to fetch session for initialization:', fetchError);
+        return;
+      }
+
+      // Load FEN from session
+      if (session.initial_fen) {
+        console.log('[RoomManager] Loading initial FEN:', session.initial_fen);
+        store.game.loadFen(session.initial_fen);
+      }
+
+      // Set time controls
+      if (session.time_control_initial !== null) {
+        const minutes = session.time_control_initial / 60; // Convert seconds to minutes
+        const increment = session.time_control_increment;
+        console.log('[RoomManager] Setting time controls:', minutes, 'minutes +', increment, 'seconds');
+        store.game.setTimeControl(minutes, increment);
+      }
+
+      // Mark local player as ready
+      multiplayer.setLocalPlayerReady(true);
+      
+      // Broadcast that we're ready
+      await broadcastPlayerReady();
+      
+      console.log('[RoomManager] Game initialized, waiting for opponent to be ready');
+    } catch (error) {
+      console.error('[RoomManager] Error initializing game:', error);
+    }
+  }, [sessionId, store.game, multiplayer, broadcastPlayerReady]);
 
   // Assign player to a color and update session
   const assignPlayerToSession = useCallback(async () => {
@@ -323,6 +376,8 @@ const RoomManager = observer(function RoomManager({
             
             if (newSession.state === 'active') {
               onShowMessage?.('success', 'Game is starting!');
+              // Initialize the game when session becomes active
+              initializeGameFromSession();
             }
           }
 
@@ -394,7 +449,7 @@ const RoomManager = observer(function RoomManager({
       console.log(`[RoomManager] Cleaning up session subscription`);
       supabase.removeChannel(sessionChannel);
     };
-  }, [sessionId, multiplayer, displayName, onShowMessage, store.ui]);
+  }, [sessionId, multiplayer, displayName, onShowMessage, store.ui, initializeGameFromSession]);
 
   // Update presence when display name changes (Issue 2 fix)
   useEffect(() => {
@@ -418,6 +473,15 @@ const RoomManager = observer(function RoomManager({
       });
     }
   }, [displayName, multiplayer.connectionStatus, multiplayer.localPlayerId, multiplayer.localPlayer, roomId, updatePresence]);
+
+  // Start clocks when both players are ready (Issue 4)
+  useEffect(() => {
+    if (multiplayer.areBothPlayersReady && multiplayer.sessionState === 'active' && !store.game.isTimerRunning) {
+      console.log('[RoomManager] Both players ready, starting clocks');
+      store.game.startTimer();
+      onShowMessage?.('success', 'Game started! Good luck!');
+    }
+  }, [multiplayer.areBothPlayersReady, multiplayer.sessionState, store.game, onShowMessage]);
 
   // Connect to room when joining
   useEffect(() => {
@@ -701,7 +765,15 @@ const RoomManager = observer(function RoomManager({
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-300">Status:</span>
               <span className="text-sm font-semibold text-yellow-400">
-                {multiplayer.sessionState === 'waiting' ? 'Waiting for opponent...' : multiplayer.sessionState}
+                {multiplayer.sessionState === 'waiting' 
+                  ? 'Waiting for opponent...' 
+                  : multiplayer.sessionState === 'active' 
+                    ? (multiplayer.localPlayerReady && !multiplayer.remotePlayerReady 
+                        ? 'Waiting for opponent to load...' 
+                        : multiplayer.areBothPlayersReady 
+                          ? 'Game active!' 
+                          : 'Loading game...')
+                    : multiplayer.sessionState}
               </span>
             </div>
           </div>

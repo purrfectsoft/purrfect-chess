@@ -579,6 +579,10 @@ const MultiplayerStateModel = types
       types.enumeration('GameResult', ['1-0', '0-1', '1/2-1/2', '*'])
     ),
     resultReason: types.maybeNull(types.string),
+    
+    // Game start readiness tracking (transient)
+    localPlayerReady: types.optional(types.boolean, false),
+    remotePlayerReady: types.optional(types.boolean, false),
   })
   .volatile(() => ({
     // Move queue for synchronization (not persisted)
@@ -667,6 +671,12 @@ const MultiplayerStateModel = types
       const whitePlayer = this.getPlayerByColor('white');
       const blackPlayer = this.getPlayerByColor('black');
       return whitePlayer !== null && blackPlayer !== null;
+    },
+    /**
+     * Check if both players are ready to start the game
+     */
+    get areBothPlayersReady() {
+      return self.localPlayerReady && self.remotePlayerReady;
     },
   }))
   .actions((self) => ({
@@ -1003,6 +1013,24 @@ const MultiplayerStateModel = types
     },
 
     /**
+     * Set local player as ready to start the game
+     */
+    setLocalPlayerReady(ready: boolean = true) {
+      self.localPlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Local player ready: ${ready}`);
+    },
+    
+    /**
+     * Set remote player as ready (received from broadcast)
+     */
+    setRemotePlayerReady(ready: boolean = true) {
+      self.remotePlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Remote player ready: ${ready}`);
+    },
+
+    /**
      * Reset the multiplayer state to initial values
      */
     reset() {
@@ -1018,6 +1046,8 @@ const MultiplayerStateModel = types
       self.drawOfferedBy = null;
       self.gameResult = null;
       self.resultReason = null;
+      self.localPlayerReady = false;
+      self.remotePlayerReady = false;
       self.lastActivityAt = new Date().toISOString();
       console.log('[MultiplayerStore] State reset');
     },
