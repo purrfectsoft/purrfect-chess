@@ -2,7 +2,7 @@
 /**
  * Stockfish Vendoring Script
  *
- * Automatically copies the appropriate Stockfish variant from node_modules
+ * Automatically copies ALL Stockfish variants from node_modules
  * to the public/libs directory for use in the Next.js application.
  *
  * Stockfish Package Details:
@@ -10,20 +10,12 @@
  * - Source: https://github.com/nmrugg/stockfish.js
  * - License: GPL v3
  *
- * Available Variants:
- * 1. Multi-threaded WASM (~75MB): Strongest, requires CORS headers
- * 2. Single-threaded WASM (~75MB): Strong, no CORS required
- * 3. Lite Multi-threaded WASM (~7MB): Weaker, requires CORS headers
- * 4. Lite Single-threaded WASM (~7MB): Weaker, no CORS required
+ * Available Variants (all copied):
+ * 1. Full Multi-threaded WASM (~75MB): Strongest, requires CORS headers
+ * 2. Full Single-threaded WASM (~75MB): Strongest without CORS, DEFAULT
+ * 3. Lite Multi-threaded WASM (~7MB): Moderate, requires CORS headers
+ * 4. Lite Single-threaded WASM (~7MB): Moderate, no CORS required
  * 5. ASM.js (~10MB): Weakest, universal compatibility
- *
- * Selected Variant: Lite Single-threaded WASM
- * Rationale:
- * - No CORS headers required (works in all deployment scenarios)
- * - Reasonable file size (~7MB vs ~75MB)
- * - WASM performance (faster than asm.js)
- * - Single-threaded (no SharedArrayBuffer complexity)
- * - Sufficient strength for in-browser analysis
  */
 
 import fs from 'fs';
@@ -36,8 +28,6 @@ const __dirname = path.dirname(__filename);
 
 // Configuration
 const STOCKFISH_VERSION = '17.1';
-const VARIANT = 'lite-single';
-const VARIANT_HASH = '03e3232';
 
 const SOURCE_DIR = path.join(
   __dirname,
@@ -48,26 +38,57 @@ const SOURCE_DIR = path.join(
 );
 const TARGET_DIR = path.join(__dirname, '..', 'public', 'libs');
 
-// Determine which files to copy based on variant
-const getFilesToCopy = (variant, hash) => {
-  const baseName = `stockfish-${STOCKFISH_VERSION}-${variant}-${hash}`;
+/**
+ * All Stockfish variants to vendor
+ * Ordered by strength (strongest first)
+ */
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const VARIANTS = require('../lib/stockfish-variants.json');
 
-  switch (variant) {
-    case 'lite-single':
-      return [
-        { src: `${baseName}.js`, dest: 'stockfish-lite-single.js' },
-        { src: `${baseName}.wasm`, dest: 'stockfish-lite-single.wasm' },
-      ];
-    default:
-      throw new Error(`Unknown variant: ${variant}`);
+/**
+ * Get files to copy for a variant
+ */
+const getFilesToCopy = (variant) => {
+  // Full multi-threaded WASM variant uses filenames without the variant id in the base name
+  const baseName = variant.id === 'wasm'
+    ? `stockfish-${STOCKFISH_VERSION}-${variant.hash}`
+    : `stockfish-${STOCKFISH_VERSION}-${variant.id}-${variant.hash}`;
+  const files = [];
+
+  // JS file
+  files.push({
+    src: `${baseName}.js`,
+    dest: `stockfish-${variant.id}.js`,
+  });
+
+  // WASM file(s)
+  if (variant.hasWasm) {
+    if (variant.wasmParts > 0) {
+      // Multi-part WASM (full variants)
+      for (let i = 0; i < variant.wasmParts; i++) {
+        files.push({
+          src: `${baseName}-part-${i}.wasm`,
+          dest: `stockfish-${variant.id}-part-${i}.wasm`,
+        });
+      }
+    } else {
+      // Single WASM file (lite variants)
+      files.push({
+        src: `${baseName}.wasm`,
+        dest: `stockfish-${variant.id}.wasm`,
+      });
+    }
   }
+
+  return files;
 };
 
 // Main vendoring function
 function vendorStockfish() {
-  console.log('=== Stockfish Vendoring Script ===');
+  console.log('=== Stockfish Multi-Variant Vendoring Script ===');
   console.log(`Version: ${STOCKFISH_VERSION}`);
-  console.log(`Variant: ${VARIANT}`);
+  console.log(`Variants: ${VARIANTS.length}`);
   console.log(`Source: ${SOURCE_DIR}`);
   console.log(`Target: ${TARGET_DIR}`);
   console.log('');
@@ -78,43 +99,67 @@ function vendorStockfish() {
     fs.mkdirSync(TARGET_DIR, { recursive: true });
   }
 
-  // Get files to copy
-  const files = getFilesToCopy(VARIANT, VARIANT_HASH);
-
   let totalSize = 0;
-  let copiedCount = 0;
+  let totalFiles = 0;
+  const variantSizes = [];
 
-  // Copy each file
-  for (const { src, dest } of files) {
-    const sourcePath = path.join(SOURCE_DIR, src);
-    const targetPath = path.join(TARGET_DIR, dest);
+  // Process each variant
+  for (const variant of VARIANTS) {
+    console.log(`\n📦 Processing: ${variant.name}`);
+    const files = getFilesToCopy(variant);
 
-    if (!fs.existsSync(sourcePath)) {
-      console.error(`❌ Source file not found: ${src}`);
-      console.error(`   Expected at: ${sourcePath}`);
-      process.exit(1);
+    let variantSize = 0;
+    let variantFiles = 0;
+
+    // Copy each file
+    for (const { src, dest } of files) {
+      const sourcePath = path.join(SOURCE_DIR, src);
+      const targetPath = path.join(TARGET_DIR, dest);
+
+      if (!fs.existsSync(sourcePath)) {
+        console.error(`  ❌ Source file not found: ${src}`);
+        console.error(`     Expected at: ${sourcePath}`);
+        process.exit(1);
+      }
+
+      // Copy file
+      fs.copyFileSync(sourcePath, targetPath);
+
+      // Get file size
+      const stats = fs.statSync(targetPath);
+      const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+      variantSize += stats.size;
+      variantFiles++;
+
+      console.log(`  ✓ ${dest} (${sizeMB} MB)`);
     }
 
-    // Copy file
-    fs.copyFileSync(sourcePath, targetPath);
+    const variantSizeMB = (variantSize / (1024 * 1024)).toFixed(2);
+    variantSizes.push({
+      name: variant.name,
+      sizeMB: variantSizeMB,
+      files: variantFiles,
+    });
 
-    // Get file size
-    const stats = fs.statSync(targetPath);
-    const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-    totalSize += stats.size;
-    copiedCount++;
+    totalSize += variantSize;
+    totalFiles += variantFiles;
 
-    console.log(`✓ Copied: ${dest} (${sizeMB} MB)`);
+    console.log(`  📊 Total for ${variant.id}: ${variantSizeMB} MB (${variantFiles} files)`);
   }
 
   const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-  console.log('');
-  console.log(`=== Vendoring Complete ===`);
-  console.log(`Files copied: ${copiedCount}`);
+
+  console.log('\n=== Vendoring Complete ===');
+  console.log(`Total files copied: ${totalFiles}`);
   console.log(`Total size: ${totalSizeMB} MB`);
   console.log('');
-  console.log('Stockfish files are now available in public/libs/');
-  console.log(`Worker will load from: /libs/stockfish-${VARIANT}.js`);
+  console.log('Variant Summary:');
+  for (const { name, sizeMB, files } of variantSizes) {
+    console.log(`  • ${name}: ${sizeMB} MB (${files} files)`);
+  }
+  console.log('');
+  console.log('✓ All Stockfish variants are now available in public/libs/');
+  console.log('  Workers can load from: /libs/stockfish-{variant-id}.js');
 }
 
 // Run the script

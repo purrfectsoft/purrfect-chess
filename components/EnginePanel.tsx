@@ -4,6 +4,8 @@ import { useEngine } from '@/hooks/useEngine';
 import { useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { useRootStore } from '@/stores/store-setup';
+import EngineVariantSelector from './EngineVariantSelector';
+import { getVariantById } from '@/lib/stockfish-variants';
 
 /**
  * Engine Analysis Panel Component (Legacy-compatible version)
@@ -164,6 +166,9 @@ const EnginePanel = observer(function EnginePanel() {
         </button>
       </div>
 
+      {/* Variant Selector */}
+      <EngineVariantSelector />
+
       {/* Depth Control (matching legacy) */}
       <label className="grid grid-cols-[auto_auto_1fr] items-center gap-2 mb-4 text-sm">
         <span style={{ color: '#dcdcdc' }}>Search Depth:</span>
@@ -314,7 +319,7 @@ const EnginePanel = observer(function EnginePanel() {
       </div>
 
       <div className="mt-4 text-xs text-center" style={{ color: '#999' }}>
-        Powered by Stockfish 17
+        Powered by Stockfish 17 ({getVariantById(engine.selectedVariant)?.name || `Unknown variant: ${engine.selectedVariant}`})
       </div>
     </div>
   );
