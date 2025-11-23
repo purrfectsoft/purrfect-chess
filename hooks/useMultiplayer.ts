@@ -9,6 +9,7 @@ import {
   type SessionStatePayload,
   type PlayerJoinPayload,
   type PlayerLeavePayload,
+  type PlayerReadyPayload,
   type DrawOfferPayload,
   type DrawResponsePayload,
   type ResignPayload,
@@ -47,6 +48,10 @@ export interface UseMultiplayerOptions {
     payload: PlayerLeavePayload,
     message: RealtimeMessage<PlayerLeavePayload>
   ) => void;
+  onPlayerReady?: (
+    payload: PlayerReadyPayload,
+    message: RealtimeMessage<PlayerReadyPayload>
+  ) => void;
   onDrawOffer?: (
     payload: DrawOfferPayload,
     message: RealtimeMessage<DrawOfferPayload>
@@ -74,6 +79,7 @@ export interface UseMultiplayerReturn {
   isConnected: boolean;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  updatePresence: (presenceState: PresenceState) => Promise<void>;
   broadcastMove: (move: Omit<MovePayload, 'sessionId'>) => Promise<void>;
   broadcastSessionStateChange: (
     state: Omit<SessionStatePayload, 'sessionId'>
@@ -82,6 +88,7 @@ export interface UseMultiplayerReturn {
     player: Omit<PlayerJoinPayload, 'sessionId'>
   ) => Promise<void>;
   broadcastPlayerLeave: () => Promise<void>;
+  broadcastPlayerReady: () => Promise<void>;
   broadcastDrawOffer: () => Promise<void>;
   broadcastDrawResponse: (accepted: boolean) => Promise<void>;
   broadcastResign: () => Promise<void>;
@@ -115,6 +122,7 @@ export function useMultiplayer(
     onSessionStateChange,
     onPlayerJoin,
     onPlayerLeave,
+    onPlayerReady,
     onDrawOffer,
     onDrawResponse,
     onResign,
@@ -136,6 +144,7 @@ export function useMultiplayer(
     onSessionStateChange,
     onPlayerJoin,
     onPlayerLeave,
+    onPlayerReady,
     onDrawOffer,
     onDrawResponse,
     onResign,
@@ -151,6 +160,7 @@ export function useMultiplayer(
       onSessionStateChange,
       onPlayerJoin,
       onPlayerLeave,
+      onPlayerReady,
       onDrawOffer,
       onDrawResponse,
       onResign,
@@ -163,6 +173,7 @@ export function useMultiplayer(
     onSessionStateChange,
     onPlayerJoin,
     onPlayerLeave,
+    onPlayerReady,
     onDrawOffer,
     onDrawResponse,
     onResign,
@@ -216,6 +227,9 @@ export function useMultiplayer(
         onPlayerLeave: (message) => {
           callbacksRef.current.onPlayerLeave?.(message.payload, message);
         },
+        onPlayerReady: (message) => {
+          callbacksRef.current.onPlayerReady?.(message.payload, message);
+        },
         onDrawOffer: (message) => {
           callbacksRef.current.onDrawOffer?.(message.payload, message);
         },
@@ -257,6 +271,19 @@ export function useMultiplayer(
       console.error('[useMultiplayer] Disconnect error:', error);
     }
   }, [roomId, updateConnectionStatus]);
+
+  // Update presence
+  const updatePresence = useCallback(
+    async (presenceState: PresenceState) => {
+      if (!channelManagerRef.current) {
+        console.error('[useMultiplayer] Cannot update presence - not initialized');
+        return;
+      }
+
+      await channelManagerRef.current.updatePresence(roomId, presenceState);
+    },
+    [roomId]
+  );
 
   // Broadcast a move
   const broadcastMove = useCallback(
@@ -347,6 +374,26 @@ export function useMultiplayer(
     );
   }, [roomId, playerId]);
 
+  // Broadcast player ready
+  const broadcastPlayerReady = useCallback(async () => {
+    if (!channelManagerRef.current) {
+      console.error('[useMultiplayer] Cannot broadcast - not initialized');
+      return;
+    }
+
+    const payload: PlayerReadyPayload = {
+      sessionId: roomId,
+      playerId,
+    };
+
+    await channelManagerRef.current.broadcast(
+      roomId,
+      RealtimeEventType.PLAYER_READY,
+      payload,
+      playerId
+    );
+  }, [roomId, playerId]);
+
   // Broadcast draw offer
   const broadcastDrawOffer = useCallback(async () => {
     if (!channelManagerRef.current) {
@@ -428,10 +475,12 @@ export function useMultiplayer(
     isConnected: connectionStatus === ConnectionStatus.CONNECTED,
     connect,
     disconnect,
+    updatePresence,
     broadcastMove,
     broadcastSessionStateChange,
     broadcastPlayerJoin,
     broadcastPlayerLeave,
+    broadcastPlayerReady,
     broadcastDrawOffer,
     broadcastDrawResponse,
     broadcastResign,

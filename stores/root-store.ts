@@ -301,6 +301,7 @@ const UIStateModel = types
     isEnginePanelVisible: types.optional(types.boolean, false),
     isEvalBarVisible: types.optional(types.boolean, false),
     isBoardFlipped: types.optional(types.boolean, false),
+    userOverrodeFlip: types.optional(types.boolean, false),
     engineDisplayMode: types.optional(
       types.enumeration('EngineDisplayMode', [
         'squares',
@@ -331,6 +332,13 @@ const UIStateModel = types
     },
     toggleBoardFlip() {
       self.isBoardFlipped = !self.isBoardFlipped;
+      self.userOverrodeFlip = true; // User manually toggled the flip
+    },
+    setBoardFlipped(flipped: boolean, isAutomatic: boolean = false) {
+      self.isBoardFlipped = flipped;
+      if (!isAutomatic) {
+        self.userOverrodeFlip = true;
+      }
     },
     setEngineDisplayMode(mode: 'squares' | 'arrows' | 'both' | 'none') {
       self.engineDisplayMode = mode;
@@ -491,6 +499,7 @@ const MultiplayerPlayerModel = types.model('MultiplayerPlayer', {
   id: types.identifier,
   displayName: types.string,
   color: types.maybeNull(types.enumeration('PlayerColor', ['white', 'black'])),
+  role: types.optional(types.enumeration('PlayerRole', ['seat', 'spectator']), 'spectator'),
   isOnline: types.optional(types.boolean, true),
   lastSeenAt: types.optional(types.string, () => new Date().toISOString()),
 });
@@ -570,6 +579,10 @@ const MultiplayerStateModel = types
       types.enumeration('GameResult', ['1-0', '0-1', '1/2-1/2', '*'])
     ),
     resultReason: types.maybeNull(types.string),
+    
+    // Game start readiness tracking (not persisted - will reset on hydration)
+    localPlayerReady: types.optional(types.boolean, false),
+    remotePlayerReady: types.optional(types.boolean, false),
   })
   .volatile(() => ({
     // Move queue for synchronization (not persisted)
@@ -627,6 +640,44 @@ const MultiplayerStateModel = types
     get isDrawOfferedByRemotePlayer() {
       return self.pendingDrawOffer && self.drawOfferedBy !== self.localPlayerId;
     },
+    /**
+     * Get all seat-holders (players with assigned colors)
+     */
+    get seatHolders() {
+      const seats: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'seat' && player.color) {
+          seats.push(player);
+        }
+      });
+      return seats;
+    },
+    /**
+     * Get all spectators (players without seats)
+     */
+    get spectators() {
+      const specs: Instance<typeof MultiplayerPlayerModel>[] = [];
+      self.players.forEach((player) => {
+        if (player.role === 'spectator') {
+          specs.push(player);
+        }
+      });
+      return specs;
+    },
+    /**
+     * Check if both seats are filled
+     */
+    get areBothSeatsFilled() {
+      const whitePlayer = this.getPlayerByColor('white');
+      const blackPlayer = this.getPlayerByColor('black');
+      return whitePlayer !== null && blackPlayer !== null;
+    },
+    /**
+     * Check if both players are ready to start the game
+     */
+    get areBothPlayersReady() {
+      return self.localPlayerReady && self.remotePlayerReady;
+    },
   }))
   .actions((self) => ({
     /**
@@ -660,6 +711,7 @@ const MultiplayerStateModel = types
           id: localPlayerId,
           displayName,
           color: null,
+          role: 'spectator', // Initially a spectator until assigned a color
           isOnline: true,
           lastSeenAt: new Date().toISOString(),
         });
@@ -692,6 +744,7 @@ const MultiplayerStateModel = types
 
     /**
      * Add or update a player
+     * Automatically determines role based on seat availability and color assignment
      */
     addOrUpdatePlayer(
       playerId: string,
@@ -700,20 +753,54 @@ const MultiplayerStateModel = types
       isOnline?: boolean
     ) {
       const existingPlayer = self.players.get(playerId);
+      
+      // Determine role based on color and seat availability
+      // Players with colors are seat-holders, others are spectators
+      let role: 'seat' | 'spectator' = 'spectator';
+      
+      if (color && (color === 'white' || color === 'black')) {
+        // Player has a color - they're a seat-holder
+        role = 'seat';
+      } else if (existingPlayer && existingPlayer.role === 'seat') {
+        // Keep existing seat role if player already has one
+        role = 'seat';
+      }
+      
       if (existingPlayer) {
         existingPlayer.displayName = displayName;
         if (color !== undefined) {
           existingPlayer.color = color;
+          // Update role when color is assigned
+          if (color) {
+            existingPlayer.role = 'seat';
+          }
         }
         if (isOnline !== undefined) {
           existingPlayer.isOnline = isOnline;
         }
         existingPlayer.lastSeenAt = new Date().toISOString();
       } else {
+        // Client-side guard: prevent adding more than 2 seat-holders
+        if (role === 'seat' && color) {
+          // Check if another player already has this color seat (using Array.find for efficiency)
+          const playersArray = Array.from(self.players.values());
+          const existingColorPlayer = playersArray.find(
+            (player) => player.color === color && player.id !== playerId
+          );
+          
+          if (existingColorPlayer) {
+            console.warn(
+              `[MultiplayerStore] Attempted to add duplicate ${color} player. Converting to spectator.`
+            );
+            role = 'spectator';
+          }
+        }
+        
         self.players.put({
           id: playerId,
           displayName,
           color: color || null,
+          role,
           isOnline: isOnline ?? true,
           lastSeenAt: new Date().toISOString(),
         });
@@ -924,6 +1011,24 @@ const MultiplayerStateModel = types
     },
 
     /**
+     * Set local player as ready to start the game
+     */
+    setLocalPlayerReady(ready: boolean = true) {
+      self.localPlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Local player ready: ${ready}`);
+    },
+    
+    /**
+     * Set remote player as ready (received from broadcast)
+     */
+    setRemotePlayerReady(ready: boolean = true) {
+      self.remotePlayerReady = ready;
+      self.lastActivityAt = new Date().toISOString();
+      console.log(`[MultiplayerStore] Remote player ready: ${ready}`);
+    },
+
+    /**
      * Reset the multiplayer state to initial values
      */
     reset() {
@@ -939,6 +1044,8 @@ const MultiplayerStateModel = types
       self.drawOfferedBy = null;
       self.gameResult = null;
       self.resultReason = null;
+      self.localPlayerReady = false;
+      self.remotePlayerReady = false;
       self.lastActivityAt = new Date().toISOString();
       console.log('[MultiplayerStore] State reset');
     },
@@ -981,6 +1088,7 @@ export const createDefaultSnapshot = () => ({
     isEnginePanelVisible: false,
     isEvalBarVisible: false,
     isBoardFlipped: false,
+    userOverrodeFlip: false,
     engineDisplayMode: 'both' as const,
   },
   settings: {

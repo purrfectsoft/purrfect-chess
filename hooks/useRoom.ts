@@ -51,6 +51,7 @@ export function useRoom() {
 
   /**
    * Get or create a player in the database
+   * Always updates the display name to ensure consistency
    */
   const getOrCreatePlayer = useCallback(async (displayName: string = 'Anonymous Cat') => {
     const clientId = getOrCreateClientId();
@@ -66,7 +67,21 @@ export function useRoom() {
         throw rpcError;
       }
 
-      return data as string; // Returns player UUID
+      const playerId = data as string; // Returns player UUID
+      
+      // Always update display name in DB to ensure it's current
+      // This fixes stale name issues when player returns with a different name
+      const { error: updateError } = await supabase
+        .from('players')
+        .update({ display_name: displayName })
+        .eq('id', playerId);
+      
+      if (updateError) {
+        console.warn('[useRoom] Failed to update display name for player', playerId, ':', updateError);
+        // Don't throw - this is not critical
+      }
+
+      return playerId;
     } catch (err) {
       console.error('[useRoom] Failed to get or create player:', err);
       throw err;

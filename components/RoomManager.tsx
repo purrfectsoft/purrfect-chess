@@ -8,6 +8,35 @@ import { useMultiplayer } from '@/hooks/useMultiplayer';
 import { supabase } from '@/lib/supabase/client';
 import ConnectionStatusBadge from './ConnectionStatusBadge';
 
+// Constants
+const SECONDS_PER_MINUTE = 60;
+
+/**
+ * Get session status text based on current state
+ */
+function getSessionStatusText(
+  sessionState: string,
+  localPlayerReady: boolean,
+  remotePlayerReady: boolean,
+  areBothPlayersReady: boolean
+): string {
+  if (sessionState === 'waiting') {
+    return 'Waiting for opponent...';
+  }
+  
+  if (sessionState === 'active') {
+    if (areBothPlayersReady) {
+      return 'Game active!';
+    }
+    if (localPlayerReady && !remotePlayerReady) {
+      return 'Waiting for opponent to load...';
+    }
+    return 'Loading game...';
+  }
+  
+  return sessionState;
+}
+
 interface RoomManagerProps {
   /** Callback when room is created or joined */
   onRoomJoined?: (roomId: string, sessionId: string) => void;
@@ -56,7 +85,7 @@ const RoomManager = observer(function RoomManager({
   });
 
   // Initialize multiplayer connection when in a room
-  const { connectionStatus, connect, disconnect, broadcastPlayerJoin } = useMultiplayer({
+  const { connectionStatus, connect, disconnect, updatePresence, broadcastPlayerJoin, broadcastPlayerReady } = useMultiplayer({
     roomId: roomId || '',
     playerId: multiplayer.localPlayerId || '',
     autoConnect: false,
@@ -83,6 +112,11 @@ const RoomManager = observer(function RoomManager({
         onShowMessage?.('info', `${player.displayName} left the room`);
       }
       multiplayer.removePlayer(payload.playerId);
+    },
+    onPlayerReady: (payload) => {
+      // Remote player is ready
+      console.log('[RoomManager] Remote player ready:', payload.playerId);
+      multiplayer.setRemotePlayerReady(true);
     },
     onPresenceJoin: (playerId, state) => {
       // Update player online status via presence
@@ -174,6 +208,59 @@ const RoomManager = observer(function RoomManager({
     }
   }, [sessionId, multiplayer, fetchAndAddPlayer]);
 
+  // Initialize game when session becomes active (Issue 4)
+  const initializeGameFromSession = useCallback(async () => {
+    if (!sessionId) {
+      console.warn('[RoomManager] Cannot initialize game - missing session ID');
+      return;
+    }
+
+    try {
+      console.log('[RoomManager] Initializing game from session');
+      
+      // Fetch session data
+      const { data: session, error: fetchError } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (fetchError || !session) {
+        console.error('[RoomManager] Failed to fetch session for initialization:', fetchError);
+        return;
+      }
+
+      // Load FEN from session
+      if (session.initial_fen) {
+        console.log('[RoomManager] Loading initial FEN:', session.initial_fen);
+        // Validate and load FEN - loadFen has built-in validation
+        const success = store.game.loadFen(session.initial_fen);
+        if (!success) {
+          console.error('[RoomManager] Failed to load FEN, using default position');
+          onShowMessage?.('error', 'Failed to load game position');
+        }
+      }
+
+      // Set time controls (convert seconds to minutes)
+      if (session.time_control_initial !== null) {
+        const minutes = session.time_control_initial / SECONDS_PER_MINUTE;
+        const increment = session.time_control_increment;
+        console.log('[RoomManager] Setting time controls:', minutes, 'minutes +', increment, 'seconds');
+        store.game.setTimeControl(minutes, increment);
+      }
+
+      // Mark local player as ready
+      multiplayer.setLocalPlayerReady(true);
+      
+      // Broadcast that we're ready
+      await broadcastPlayerReady();
+      
+      console.log('[RoomManager] Game initialized, waiting for opponent to be ready');
+    } catch (error) {
+      console.error('[RoomManager] Error initializing game:', error);
+    }
+  }, [sessionId, store.game, multiplayer, broadcastPlayerReady]);
+
   // Assign player to a color and update session
   const assignPlayerToSession = useCallback(async () => {
     if (!sessionId || !multiplayer.localPlayerId) {
@@ -256,6 +343,16 @@ const RoomManager = observer(function RoomManager({
           true
         );
 
+        // Auto-flip board for black players (Issue 3)
+        // Only flip if user hasn't manually overridden the flip setting
+        if (assignedColor === 'black' && !store.ui.userOverrodeFlip) {
+          console.log('[RoomManager] Auto-flipping board for black player');
+          store.ui.setBoardFlipped(true, true); // true = automatic flip
+        } else if (assignedColor === 'white' && !store.ui.userOverrodeFlip) {
+          console.log('[RoomManager] Setting normal orientation for white player');
+          store.ui.setBoardFlipped(false, true); // false = white on bottom
+        }
+
         // Update session state in store if we just activated it
         if (updates.state === 'active') {
           multiplayer.setSessionState('active');
@@ -277,7 +374,7 @@ const RoomManager = observer(function RoomManager({
     } catch (error) {
       console.error('[RoomManager] Error in assignPlayerToSession:', error);
     }
-  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin, syncExistingPlayers]);
+  }, [sessionId, multiplayer, displayName, broadcastPlayerJoin, syncExistingPlayers, store.ui]);
 
   // Subscribe to session changes to detect when second player joins
   useEffect(() => {
@@ -313,6 +410,8 @@ const RoomManager = observer(function RoomManager({
             
             if (newSession.state === 'active') {
               onShowMessage?.('success', 'Game is starting!');
+              // Initialize the game when session becomes active
+              initializeGameFromSession();
             }
           }
 
@@ -324,6 +423,10 @@ const RoomManager = observer(function RoomManager({
               'white',
               true
             );
+            // Auto-flip board for white (not flipped)
+            if (!store.ui.userOverrodeFlip) {
+              store.ui.setBoardFlipped(false, true);
+            }
           } else if (newSession.black_player_id === multiplayer.localPlayerId) {
             multiplayer.addOrUpdatePlayer(
               multiplayer.localPlayerId,
@@ -331,6 +434,10 @@ const RoomManager = observer(function RoomManager({
               'black',
               true
             );
+            // Auto-flip board for black
+            if (!store.ui.userOverrodeFlip) {
+              store.ui.setBoardFlipped(true, true);
+            }
           }
 
           // Fetch and add the other player's information when session has both players
@@ -376,7 +483,39 @@ const RoomManager = observer(function RoomManager({
       console.log(`[RoomManager] Cleaning up session subscription`);
       supabase.removeChannel(sessionChannel);
     };
-  }, [sessionId, multiplayer, displayName, onShowMessage]);
+  }, [sessionId, multiplayer, displayName, onShowMessage, store.ui, initializeGameFromSession]);
+
+  // Update presence when display name changes (Issue 2 fix)
+  useEffect(() => {
+    // Only update if we're connected and have a player ID
+    if (
+      multiplayer.connectionStatus === 'connected' &&
+      multiplayer.localPlayerId &&
+      roomId &&
+      displayName
+    ) {
+      const presenceState = {
+        playerId: multiplayer.localPlayerId,
+        displayName: displayName || 'Anonymous Cat',
+        online_at: new Date().toISOString(),
+        color: multiplayer.localPlayer?.color as 'white' | 'black' | undefined,
+      };
+      
+      console.log('[RoomManager] Updating presence with new display name:', displayName);
+      updatePresence(presenceState).catch((error) => {
+        console.error('[RoomManager] Failed to update presence:', error);
+      });
+    }
+  }, [displayName, multiplayer.connectionStatus, multiplayer.localPlayerId, multiplayer.localPlayer, roomId, updatePresence]);
+
+  // Start clocks when both players are ready (Issue 4)
+  useEffect(() => {
+    if (multiplayer.areBothPlayersReady && multiplayer.sessionState === 'active' && !store.game.isTimerRunning) {
+      console.log('[RoomManager] Both players ready, starting clocks');
+      store.game.startTimer();
+      onShowMessage?.('success', 'Game started! Good luck!');
+    }
+  }, [multiplayer.areBothPlayersReady, multiplayer.sessionState, store.game, onShowMessage]);
 
   // Connect to room when joining
   useEffect(() => {
@@ -520,8 +659,9 @@ const RoomManager = observer(function RoomManager({
     }
   }, [roomId, onShowMessage]);
 
-  // Get list of players in the room
-  const playersInRoom = Array.from(multiplayer.players.values());
+  // Get seat-holders and spectators separately
+  const seatHolders = multiplayer.seatHolders;
+  const spectators = multiplayer.spectators;
 
   return (
     <div className="flex flex-col gap-4 p-4 rounded-lg" style={{ background: '#2a2a2a' }}>
@@ -659,19 +799,24 @@ const RoomManager = observer(function RoomManager({
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-300">Status:</span>
               <span className="text-sm font-semibold text-yellow-400">
-                {multiplayer.sessionState === 'waiting' ? 'Waiting for opponent...' : multiplayer.sessionState}
+                {getSessionStatusText(
+                  multiplayer.sessionState,
+                  multiplayer.localPlayerReady,
+                  multiplayer.remotePlayerReady,
+                  multiplayer.areBothPlayersReady
+                )}
               </span>
             </div>
           </div>
 
-          {/* Players in room */}
-          {playersInRoom.length > 0 && (
+          {/* Players in room - show seat-holders separately from spectators */}
+          {(seatHolders.length > 0 || spectators.length > 0) && (
             <div className="flex flex-col gap-2 p-3 rounded" style={{ background: '#333' }}>
               <span className="text-sm font-semibold text-gray-300">
-                Players ({playersInRoom.length}/2):
+                Players ({seatHolders.length}/2):
               </span>
               <ul className="list-none flex flex-col gap-1">
-                {playersInRoom.map((player) => (
+                {seatHolders.map((player) => (
                   <li
                     key={player.id}
                     className="flex items-center gap-2 text-sm"
@@ -690,6 +835,30 @@ const RoomManager = observer(function RoomManager({
                   </li>
                 ))}
               </ul>
+              
+              {/* Show spectators separately if any exist */}
+              {spectators.length > 0 && (
+                <>
+                  <span className="text-sm font-semibold text-gray-300 mt-2">
+                    Spectators ({spectators.length}):
+                  </span>
+                  <ul className="list-none flex flex-col gap-1">
+                    {spectators.map((player) => (
+                      <li
+                        key={player.id}
+                        className="flex items-center gap-2 text-sm"
+                        style={{ color: player.isOnline ? '#888' : '#666' }}
+                      >
+                        <span>{player.isOnline ? '👁️' : '⚫'}</span>
+                        <span>{player.displayName}</span>
+                        {player.id === multiplayer.localPlayerId && (
+                          <span className="text-xs text-blue-400">(you)</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           )}
 
